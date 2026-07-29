@@ -1,0 +1,2762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Forecast UCD Dashboard</title>
+<!-- Libraries bundled locally — no internet required -->
+<script src="papaparse.min.js"></script>
+<script src="xlsx.full.min.js"></script>
+<style>
+:root{
+  --blue-100:#0053e2;--blue-110:#003db5;--spark-100:#ffc220;--spark-10:#fff9e6;
+  --spark-140:#995213;--red-100:#ea1100;--red-10:#fff0f0;
+  --green-100:#2a8703;--gray-10:#f5f5f5;--gray-50:#cccccc;
+  --gray-100:#757575;--gray-160:#1a1a1a;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--gray-10);color:var(--gray-160);font-size:14px}
+
+/* ── Header ── */
+.hdr{background:#1a2744;color:#fff;padding:14px 16px;min-height:74px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.22);flex-wrap:wrap;position:relative;justify-content:flex-end}
+
+.hdr-title{position:absolute;left:0;right:0;text-align:center;pointer-events:none;padding:0 16px}
+.hdr-title h1{font-size:20px;font-weight:800;letter-spacing:.2px;line-height:1.2}
+.hdr-title .hdr-sub{font-size:12px;opacity:.8;margin-top:1px}
+.hdr-title .hdr-support{font-size:11px;opacity:.6;margin-top:2px;font-style:italic}
+.hdr-right{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0}
+.hdr-timestamps{text-align:right;font-size:10.5px;opacity:.75;line-height:1.6}
+.hdr-timestamps strong{opacity:1;color:var(--spark-100)}
+.hdr-source{font-size:12px;opacity:.55;text-align:right;white-space:nowrap;font-style:italic;letter-spacing:.1px}
+.btn-import{background:var(--spark-100);color:var(--gray-160);border:none;border-radius:7px;
+  padding:4px 12px;font-size:11px;font-weight:800;cursor:pointer;display:flex;align-items:center;gap:5px;
+  transition:background .15s;white-space:nowrap}
+.btn-import:hover{background:#e0ab00}
+
+/* ── Upload overlay ── */
+.upload-area{margin:24px 16px 16px;background:#fff;border:2px dashed var(--blue-100);border-radius:14px;
+  padding:24px 20px;text-align:center;cursor:pointer;transition:background .15s}
+.upload-area:hover,.upload-area.drag{background:#eaf1fd}
+.upload-icon{font-size:28px;margin-bottom:4px}
+.upload-title{font-size:14px;font-weight:700;color:var(--blue-100)}
+.upload-sub{color:var(--gray-100);font-size:11px;margin-top:3px}
+.upload-note{margin-top:8px;font-size:11px;background:var(--spark-10);color:var(--spark-140);
+  padding:5px 12px;border-radius:8px;display:inline-block;font-weight:600}
+
+/* ── Progress ── */
+#progress-wrap{margin:16px 24px 0;display:none}
+.progress-label{font-size:13px;color:var(--gray-100);margin-bottom:6px;display:flex;justify-content:space-between}
+.progress-track{background:var(--gray-50);border-radius:8px;height:10px;overflow:hidden}
+.progress-bar{height:100%;background:var(--blue-100);width:0%;transition:width .08s;border-radius:8px}
+
+/* ── Sections ── */
+.section{margin:0 24px 28px;background:#fff;border-radius:12px;box-shadow:0 1px 5px rgba(0,0,0,.09);overflow:hidden}
+.sec-hdr{background:var(--blue-100);color:#fff;padding:12px 18px;font-size:14px;font-weight:700;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.sec-hdr span{font-size:12px;opacity:.85;font-weight:400}
+.btn{border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer}
+.btn-export{background:var(--spark-100);color:var(--gray-160)}
+.btn-export:hover{background:#e0ab00}
+.filter-bar{padding:10px 18px;border-bottom:1px solid var(--gray-50);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.filter-bar label{font-size:12px;color:var(--gray-100);font-weight:600}
+.filter-bar input{border:1px solid var(--gray-50);border-radius:6px;padding:5px 10px;font-size:12px;outline:none;width:200px}
+.filter-bar input:focus{border-color:var(--blue-100)}
+.tbl-wrap{overflow:auto;max-height:480px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+thead th{background:#0a1e5e;color:#fff;padding:9px 12px;text-align:center;white-space:nowrap;position:sticky;top:0;z-index:2;font-size:11.5px}
+thead th.row-hdr{text-align:left;left:0;z-index:3;min-width:140px}
+tbody td{padding:7px 12px;text-align:center;border-bottom:1px solid #ebebeb;white-space:nowrap}
+tbody td.row-hdr{text-align:left;font-weight:600;position:sticky;left:0;background:#fff;z-index:1;border-right:2px solid var(--gray-50)}
+tbody tr:nth-child(even) td{background:var(--gray-10)}
+tbody tr:nth-child(even) td.row-hdr{background:var(--gray-10)}
+tbody tr:hover td{background:#ddeafe}
+tbody tr:hover td.row-hdr{background:#ddeafe}
+.row-total td{background:#edf2ff!important;font-weight:800;border-top:2px solid var(--blue-100);color:var(--blue-100)}
+.row-total td.row-hdr{background:#edf2ff!important}
+/* ── Per-table color themes ───────────────────────────────────────────── */
+/* T1 · Walmart Blue */
+#sec-t1 .sec-hdr{background:#0053e2}
+#sec-t1 thead th{background:#0a1e5e}
+#sec-t1 tbody tr:hover td{background:#ddeafe}
+#sec-t1 tbody tr:hover td.row-hdr{background:#ddeafe}
+#sec-t1 .row-total td{background:#edf2ff!important;color:#0053e2;border-top-color:#0053e2}
+#sec-t1 .row-total td.row-hdr{background:#edf2ff!important}
+#sec-t1 tbody td.row-hdr{border-right-color:#0053e2}
+#sec-t1 .filter-bar input:focus{border-color:#0053e2}
+/* T1 ─ Release Date age highlighting (>10 days = bold red) */
+.days-hdr{white-space:nowrap;text-align:center!important}
+.days-cell{text-align:center;white-space:nowrap;font-weight:600;
+  color:var(--gray-100);border-left:1px solid rgba(255,255,255,.15)}
+#sec-t1 tr.rel-old>td.row-hdr{color:var(--red-100)!important;font-weight:800!important}
+#sec-t1 tr.rel-old>td.days-cell{color:var(--red-100)!important;font-weight:800!important}
+#sec-t1 tbody tr.rel-old:hover>td{background:#fde8e8!important}
+#sec-t1 tbody tr.rel-old:hover>td.row-hdr{background:#fde8e8!important}
+/* T1 expand/collapse rows (blue theme) */
+#sec-t1 .row-loc>td{background:#bbdefb!important;font-weight:800;cursor:pointer;user-select:none}
+#sec-t1 .row-loc>td.row-hdr{background:#bbdefb!important}
+#sec-t1 .row-loc:hover>td{background:#90caf9!important}
+#sec-t1 .row-loc:hover>td.row-hdr{background:#90caf9!important}
+#sec-t1 tr.rel-old.row-loc>td{background:#ffd6d6!important}
+#sec-t1 tr.rel-old.row-loc>td.row-hdr{background:#ffd6d6!important}
+#sec-t1 tr.rel-old.row-loc:hover>td{background:#ffb3b3!important}
+#sec-t1 tr.rel-old.row-loc:hover>td.row-hdr{background:#ffb3b3!important}
+#sec-t1 .row-sub>td{background:#f5f9ff!important}
+#sec-t1 .row-sub>td.row-hdr{background:#f5f9ff!important;padding-left:30px!important;font-style:italic;font-weight:600;color:#0053e2}
+#sec-t1 .row-sub:hover>td{background:#ddeafe!important}
+#sec-t1 .row-sub:hover>td.row-hdr{background:#ddeafe!important}
+/* T1 ─ No scroll: show all rows + column totals visible */
+#sec-t1 .tbl-wrap{max-height:none;overflow:visible;}
+/* T2 · Forest Green */
+#sec-t2 .sec-hdr{background:#1b6b36}
+#sec-t2 thead th{background:#0d3d1e}
+#sec-t2 tbody tr:nth-child(even) td{background:#f0faf3}
+#sec-t2 tbody tr:nth-child(even) td.row-hdr{background:#f0faf3}
+#sec-t2 tbody tr:hover td{background:#c8ecd3}
+#sec-t2 tbody tr:hover td.row-hdr{background:#c8ecd3}
+#sec-t2 .row-total td{background:#d6f0de!important;color:#0d3d1e;border-top-color:#1b6b36}
+#sec-t2 .row-total td.row-hdr{background:#d6f0de!important}
+#sec-t2 tbody td.row-hdr{border-right-color:#1b6b36}
+#sec-t2 .filter-bar input:focus{border-color:#1b6b36}
+#sec-t2 .btn-export{background:#ffc220;color:#1a1a1a}
+/* T3 · Deep Purple */
+#sec-t3 .sec-hdr{background:#512da8}
+#sec-t3 thead th{background:#311b92}
+#sec-t3 tbody tr:nth-child(even) td{background:#f5f0ff}
+#sec-t3 tbody tr:nth-child(even) td.row-hdr{background:#f5f0ff}
+#sec-t3 tbody tr:hover td{background:#ddd0f7}
+#sec-t3 tbody tr:hover td.row-hdr{background:#ddd0f7}
+#sec-t3 .row-total td{background:#cdb8f5!important;color:#1b0063;border-top-color:#512da8}
+#sec-t3 .row-total td.row-hdr{background:#cdb8f5!important}
+#sec-t3 tbody td.row-hdr{border-right-color:#512da8}
+#sec-t3 .filter-bar input:focus{border-color:#512da8}
+#sec-t3 .btn-export{background:#ffc220;color:#1a1a1a}
+/* T2 expand/collapse rows (forest green theme) */
+#sec-t2 .row-loc>td{background:#c8ecd3!important;font-weight:800;cursor:pointer;user-select:none}
+#sec-t2 .row-loc>td.row-hdr{background:#c8ecd3!important}
+#sec-t2 .row-loc:hover>td{background:#a5d6b0!important}
+#sec-t2 .row-loc:hover>td.row-hdr{background:#a5d6b0!important}
+#sec-t2 .row-sub>td{background:#f0faf3!important}
+#sec-t2 .row-sub>td.row-hdr{background:#f0faf3!important;padding-left:30px!important;font-style:italic;font-weight:600;color:#1b6b36}
+#sec-t2 .row-sub:hover>td{background:#c8ecd3!important}
+#sec-t2 .row-sub:hover>td.row-hdr{background:#c8ecd3!important}
+/* T3 expand/collapse rows (deep purple theme) */
+#sec-t3 .row-loc>td{background:#ddd0f7!important;font-weight:800;cursor:pointer;user-select:none}
+#sec-t3 .row-loc>td.row-hdr{background:#ddd0f7!important}
+#sec-t3 .row-loc:hover>td{background:#c4aff0!important}
+#sec-t3 .row-loc:hover>td.row-hdr{background:#c4aff0!important}
+#sec-t3 .row-sub>td{background:#f5f0ff!important}
+#sec-t3 .row-sub>td.row-hdr{background:#f5f0ff!important;padding-left:30px!important;font-style:italic;font-weight:600;color:#512da8}
+#sec-t3 .row-sub:hover>td{background:#ddd0f7!important}
+#sec-t3 .row-sub:hover>td.row-hdr{background:#ddd0f7!important}
+/* ─────────────────────────────────────────────────────────────────────── */
+.old-hdr{background:#8b0000!important}
+.old-cell{background:var(--red-10)!important;color:var(--red-100)!important;font-weight:700}
+.legend{padding:10px 18px;border-top:1px solid var(--gray-50);display:flex;gap:18px;font-size:11.5px;flex-wrap:wrap}
+.leg-item{display:flex;align-items:center;gap:6px}
+.leg-dot{width:14px;height:14px;border-radius:3px;flex-shrink:0}
+/* ── Tabs ── */
+.tab-nav{display:none;background:#1a2744;padding:4px 16px;gap:6px;flex-wrap:wrap}
+.tab-nav.visible{display:flex}
+.tab{background:rgba(255,255,255,.12);color:rgba(255,255,255,.6);border:none;border-radius:6px;padding:5px 16px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s,box-shadow .15s;letter-spacing:.2px}
+.tab:hover{background:rgba(255,255,255,.22);color:#fff}
+.tab[data-tab="dash"].active{background:#0053e2;color:#fff;box-shadow:0 3px 10px rgba(0,83,226,.45)}
+.tab[data-tab="po"].active{background:#b05e00;color:#fff;box-shadow:0 3px 10px rgba(176,94,0,.45)}
+.tab[data-tab="sym"].active{background:#00695c;color:#fff;box-shadow:0 3px 10px rgba(0,105,92,.45)}
+.tab[data-tab="lbl"].active{background:#4a148c;color:#fff;box-shadow:0 3px 10px rgba(74,20,140,.45)}
+.tab[data-tab="inf"].active{background:#455a64;color:#fff;box-shadow:0 3px 10px rgba(69,90,100,.45)}
+.tab[data-tab="sv"].active{background:#c62828;color:#fff;box-shadow:0 3px 10px rgba(198,40,40,.5)}
+.tab[data-tab="bp"].active{background:#00838f;color:#fff;box-shadow:0 3px 10px rgba(0,131,143,.45)}
+.tab[data-tab="nc"].active{background:#e65100;color:#fff;box-shadow:0 3px 10px rgba(230,81,0,.45)}
+.hidden{display:none}
+/* T-SV · SV Projection (Red) */
+#sec-sv .sec-hdr{background:#c62828}
+.sv-body{padding:16px 18px 20px;max-width:1300px}
+
+/* KPI strip */
+/* Detail table — caution red palette */
+.sv-tbl-wrap{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.07);overflow:hidden;border:1px solid #fecaca;width:100%}
+.sv-tbl-hdr{background:#fff0f0;color:#991b1b;padding:8px 12px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid #fecaca}
+.sv-tbl{width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px}
+.sv-tbl th{background:#fef2f2;color:#7f1d1d;padding:6px 4px;text-align:left;font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid #fecaca}
+.sv-tbl td{padding:6px 4px;border-bottom:1px solid #fde8e8;vertical-align:middle}
+.sv-tbl tr:last-child td{border-bottom:none}
+.sv-tbl tbody tr:hover td{background:#fff5f5}
+.sv-tbl .sv-row-sv:hover td{background:#b71c1c!important}
+.sv-tbl .sv-row-total td{background:#fee2e2;font-weight:700;border-bottom:1px solid #fecaca}
+.sv-tbl .sv-row-total td:first-child{border-left:3px solid #ea1100}
+.sv-tbl .sv-row-sv td{background:#c62828;color:#fff!important;font-weight:700;font-size:20px;padding:6px 4px}
+.sv-tbl .sv-row-sv td:first-child{border-left:3px solid #ffc220}
+.sv-tbl .sv-row-sv .sv-metric-name{color:#ffc220;font-weight:800;font-size:20px}
+.sv-tbl .sv-row-sv .sv-metric-desc{color:rgba(255,255,255,.85);font-size:11px;text-align:left}
+.sv-tbl .sv-row-sv .sv-count{color:#fff!important;font-size:20px!important}
+.sv-tbl .sv-row-sv .sv-cost{color:#fff!important;font-size:20px!important}
+.sv-metric-name{font-size:18px;font-weight:700;color:var(--gray-160);display:block;text-align:left}
+.sv-metric-desc{color:var(--gray-100);margin-top:2px;text-align:left;font-size:11px;overflow-wrap:break-word}
+.sv-count{font-size:18px;font-weight:800;text-align:right!important;white-space:nowrap}
+.sv-count.warn{color:var(--red-100)}
+.sv-count.ok{color:var(--green-100)}
+.sv-cost{font-size:17px;font-weight:700;text-align:right!important;white-space:nowrap;color:#7f1d1d}
+.sv-row-accent td:first-child{border-left:3px solid var(--row-accent,#fecaca)}
+/* T-BP · Breakpack (Cyan) */
+#sec-bp .sec-hdr{background:#00838f}
+#sec-bp thead th{background:#006064}
+#sec-bp tbody tr:nth-child(even) td{background:#e0f7fa}
+#sec-bp tbody tr:nth-child(even) td.row-hdr{background:#e0f7fa}
+#sec-bp tbody tr:hover td{background:#b2ebf2}
+#sec-bp tbody tr:hover td.row-hdr{background:#b2ebf2}
+#sec-bp .row-total td{background:#80deea!important;color:#006064;border-top-color:#00838f}
+#sec-bp .row-total td.row-hdr{background:#80deea!important}
+#sec-bp tbody td.row-hdr{border-right-color:#00838f}
+#sec-bp .filter-bar input:focus{border-color:#00838f}
+#sec-bp .btn-export{background:#ffc220;color:#1a1a1a}
+/* BP expand/collapse rows (cyan theme) */
+#sec-bp .row-loc>td{background:#b2ebf2!important;font-weight:800;cursor:pointer;user-select:none}
+#sec-bp .row-loc>td.row-hdr{background:#b2ebf2!important}
+#sec-bp .row-loc:hover>td{background:#80deea!important}
+#sec-bp .row-loc:hover>td.row-hdr{background:#80deea!important}
+#sec-bp .row-sub>td{background:#e0f7fa!important}
+#sec-bp .row-sub>td.row-hdr{background:#e0f7fa!important;padding-left:30px!important;font-style:italic;font-weight:600;color:#006064}
+#sec-bp .row-sub:hover>td{background:#b2ebf2!important}
+#sec-bp .row-sub:hover>td.row-hdr{background:#b2ebf2!important}
+/* BP2 · Oldest Freight Tracker (Dark Cyan) */
+#sec-bp2 .sec-hdr{background:#006064}
+#sec-bp2 thead th{background:#004d40;position:sticky;top:0;z-index:2}
+#sec-bp2 tbody tr:nth-child(even) td{background:#e0f7fa}
+#sec-bp2 tbody tr:hover td{background:#b2ebf2}
+#sec-bp2 tr.bp2-old td{background:var(--red-10)!important;border-left:3px solid var(--red-100)}
+#sec-bp2 tr.bp2-old td:first-child{border-left:3px solid var(--red-100)}
+#sec-bp2 tr.bp2-old:hover td{background:#fde8e8!important}
+/* NC · NonCon Summary (Deep Orange) */
+#sec-nc .sec-hdr{background:#e65100}
+#sec-nc thead th{background:#bf360c}
+#sec-nc tbody tr:nth-child(even) td{background:#fbe9e7}
+#sec-nc tbody tr:nth-child(even) td.row-hdr{background:#fbe9e7}
+#sec-nc tbody tr:hover td{background:#ffccbc}
+#sec-nc tbody tr:hover td.row-hdr{background:#ffccbc}
+#sec-nc .row-total td{background:#ffab91!important;color:#bf360c;border-top-color:#e65100}
+#sec-nc .row-total td.row-hdr{background:#ffab91!important}
+#sec-nc tbody td.row-hdr{border-right-color:#e65100}
+#sec-nc .filter-bar input:focus{border-color:#e65100}
+#sec-nc .btn-export{background:#ffc220;color:#1a1a1a}
+/* NC expand/collapse rows (deep orange theme) */
+#sec-nc .row-loc>td{background:#ffccbc!important;font-weight:800;cursor:pointer;user-select:none}
+#sec-nc .row-loc>td.row-hdr{background:#ffccbc!important}
+#sec-nc .row-loc:hover>td{background:#ffab91!important}
+#sec-nc .row-loc:hover>td.row-hdr{background:#ffab91!important}
+#sec-nc .row-sub>td{background:#fbe9e7!important}
+#sec-nc .row-sub>td.row-hdr{background:#fbe9e7!important;padding-left:30px!important;font-style:italic;font-weight:600;color:#bf360c}
+#sec-nc .row-sub:hover>td{background:#ffccbc!important}
+#sec-nc .row-sub:hover>td.row-hdr{background:#ffccbc!important}
+/* NC2 · NonCon Oldest Freight Tracker (Burnt Orange) */
+#sec-nc2 .sec-hdr{background:#bf360c}
+#sec-nc2 thead th{background:#7f0000;position:sticky;top:0;z-index:2}
+#sec-nc2 tbody tr:nth-child(even) td{background:#fbe9e7}
+#sec-nc2 tbody tr:hover td{background:#ffccbc}
+#sec-nc2 tr.nc2-old td{background:var(--red-10)!important;border-left:3px solid var(--red-100)}
+#sec-nc2 tr.nc2-old td:first-child{border-left:3px solid var(--red-100)}
+#sec-nc2 tr.nc2-old:hover td{background:#fde8e8!important}
+/* RW · Rewrites Tracker (Deep Purple) */
+#sec-rw .sec-hdr{background:#4527a0}
+#sec-rw thead th{background:#311b92;position:sticky;top:0;z-index:2}
+#sec-rw tbody tr:nth-child(even) td{background:#ede7f6}
+#sec-rw tbody tr:hover td{background:#d1c4e9}
+#sec-rw tr.rw-old td{background:var(--red-10)!important;border-left:3px solid var(--red-100)}
+#sec-rw tr.rw-old td:first-child{border-left:3px solid var(--red-100)}
+#sec-rw tr.rw-old:hover td{background:#fde8e8!important}
+/* RW-User · Rewrites by UserID (Deep Purple – pivot) */
+#sec-rw-user .sec-hdr{background:#4527a0}
+#sec-rw-user thead th{background:#311b92}
+#sec-rw-user tbody tr:nth-child(even) td{background:#f5f3ff}
+#sec-rw-user tbody tr:nth-child(even) td.row-hdr{background:#f5f3ff}
+#sec-rw-user tbody tr:hover td{background:#ede9fe}
+#sec-rw-user tbody tr:hover td.row-hdr{background:#ede9fe}
+#sec-rw-user .row-total td{background:#c4b5fd!important;color:#2e1065;border-top-color:#5b21b6}
+#sec-rw-user .row-total td.row-hdr{background:#c4b5fd!important}
+#sec-rw-user tbody td.row-hdr{border-right-color:#5b21b6}
+#sec-rw-user .row-loc>td{background:#ede9fe!important}
+#sec-rw-user .row-loc>td.row-hdr{background:#ede9fe!important}
+#sec-rw-user .row-loc:hover>td{background:#c4b5fd!important}
+#sec-rw-user .row-loc:hover>td.row-hdr{background:#c4b5fd!important}
+/* T-SYM · Teal */
+#sec-sym .sec-hdr{background:#00695c}
+#sec-sym thead th{background:#004d40}
+#sec-sym tbody tr:nth-child(even) td{background:#e0f2f1}
+#sec-sym tbody tr:nth-child(even) td.row-hdr{background:#e0f2f1}
+#sec-sym tbody tr:hover td{background:#b2dfdb}
+#sec-sym tbody tr:hover td.row-hdr{background:#b2dfdb}
+#sec-sym .row-total td{background:#a7ffeb!important;color:#004d40;border-top-color:#00695c}
+#sec-sym .row-total td.row-hdr{background:#a7ffeb!important}
+#sec-sym tbody td.row-hdr{border-right-color:#00695c}
+#sec-sym .filter-bar input:focus{border-color:#00695c}
+#sec-sym .btn-export{background:#ffc220;color:#1a1a1a}
+/* T-SYM2 · Item Number table — same green palette */
+#sec-sym2 .sec-hdr{background:#00695c}
+#sec-sym2 thead th{background:#004d40}
+#sec-sym2 tbody tr:nth-child(even) td{background:#e0f2f1}
+#sec-sym2 tbody tr:nth-child(even) td.row-hdr{background:#e0f2f1}
+#sec-sym2 tbody tr:hover td{background:#b2dfdb}
+#sec-sym2 tbody tr:hover td.row-hdr{background:#b2dfdb}
+#sec-sym2 .row-total td{background:#a7ffeb!important;color:#004d40;border-top-color:#00695c}
+#sec-sym2 .row-total td.row-hdr{background:#a7ffeb!important}
+#sec-sym2 tbody td.row-hdr{border-right-color:#00695c}
+#sec-sym2 .filter-bar input:focus{border-color:#00695c}
+#sec-sym2 .btn-export{background:#ffc220;color:#1a1a1a}
+/* T-SYM3 · Repack Container ID table — same green palette */
+#sec-sym3 .sec-hdr{background:#00695c}
+#sec-sym3 thead th{background:#004d40}
+#sec-sym3 tbody tr:nth-child(even) td{background:#e0f2f1}
+#sec-sym3 tbody tr:nth-child(even) td.row-hdr{background:#e0f2f1}
+#sec-sym3 tbody tr:hover td{background:#b2dfdb}
+#sec-sym3 tbody tr:hover td.row-hdr{background:#b2dfdb}
+#sec-sym3 .row-total td{background:#a7ffeb!important;color:#004d40;border-top-color:#00695c}
+#sec-sym3 .row-total td.row-hdr{background:#a7ffeb!important}
+#sec-sym3 tbody td.row-hdr{border-right-color:#00695c}
+#sec-sym3 .filter-bar input:focus{border-color:#00695c}
+#sec-sym3 .btn-export{background:#ffc220;color:#1a1a1a}
+/* T-INF · Blue-Grey (shared by sec-inf and sec-inf-trailer) */
+#sec-inf .sec-hdr,#sec-inf-trailer .sec-hdr{background:#455a64}
+#sec-inf thead th,#sec-inf-trailer thead th{background:#263238}
+#sec-inf tbody tr:nth-child(even) td,#sec-inf-trailer tbody tr:nth-child(even) td{background:#eceff1}
+#sec-inf tbody tr:nth-child(even) td.row-hdr,#sec-inf-trailer tbody tr:nth-child(even) td.row-hdr{background:#eceff1}
+#sec-inf tbody tr:hover td,#sec-inf-trailer tbody tr:hover td{background:#cfd8dc}
+#sec-inf tbody tr:hover td.row-hdr,#sec-inf-trailer tbody tr:hover td.row-hdr{background:#cfd8dc}
+#sec-inf .row-total td,#sec-inf-trailer .row-total td{background:#b0bec5!important;color:#263238;border-top-color:#455a64}
+#sec-inf .row-total td.row-hdr,#sec-inf-trailer .row-total td.row-hdr{background:#b0bec5!important}
+#sec-inf tbody td.row-hdr,#sec-inf-trailer tbody td.row-hdr{border-right-color:#455a64}
+#sec-inf .btn-export,#sec-inf-trailer .btn-export{background:#ffc220;color:#1a1a1a}
+/* ── SYM Instructional Panel ── */
+.sym-instr{padding:14px 18px 16px;background:#fff8f8;border-bottom:2px solid var(--red-100)}
+.sym-instr-header{display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap}
+.sym-stale-badge{background:var(--red-100);color:#fff;border-radius:10px;padding:10px 18px;min-width:160px;text-align:center;flex-shrink:0;box-shadow:0 2px 8px rgba(234,17,0,.25)}
+.sym-stale-badge .sb-num{font-size:28px;font-weight:900;line-height:1;display:block}
+.sym-stale-badge .sb-lbl{font-size:10.5px;font-weight:700;opacity:.9;margin-top:2px;display:block;text-transform:uppercase;letter-spacing:.5px}
+.sym-stale-breakdown{display:flex;gap:10px;margin-top:7px;flex-wrap:wrap}
+.sym-stale-loc{background:rgba(255,255,255,.18);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:700;color:#fff}
+.sym-instr-text{flex:1;min-width:260px}
+.sym-instr-title{font-size:13px;font-weight:800;color:var(--red-100);display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.sym-sop-label{font-size:11.5px;font-weight:700;color:var(--gray-160);margin-bottom:4px}
+.sym-sop-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.sym-sop-chip{background:#fff;border:1.5px solid var(--gray-50);border-radius:6px;padding:4px 11px;font-size:12px;font-weight:600;color:var(--gray-160);display:flex;align-items:center;gap:5px}
+.sym-sop-chip .chip-icon{font-size:13px}
+.sym-outs{background:var(--spark-10);border:1.5px solid var(--spark-100);border-radius:7px;padding:8px 13px;font-size:12px;color:var(--spark-140);font-weight:700;display:flex;align-items:flex-start;gap:7px;line-height:1.5}
+.sym-outs .outs-icon{font-size:15px;flex-shrink:0}
+/* SYM / INF expand—collapse row overrides for row-loc hover */
+#sec-inf .row-loc>td,#sec-inf-trailer .row-loc>td{background:#cfd8dc!important}
+#sec-inf .row-loc>td.row-hdr,#sec-inf-trailer .row-loc>td.row-hdr{background:#cfd8dc!important}
+#sec-inf .row-loc:hover>td,#sec-inf-trailer .row-loc:hover>td{background:#b0bec5!important}
+#sec-inf .row-loc:hover>td.row-hdr,#sec-inf-trailer .row-loc:hover>td.row-hdr{background:#b0bec5!important}
+#sec-inf .row-sub>td,#sec-inf-trailer .row-sub>td{background:#f5f7f8!important}
+#sec-inf .row-sub>td.row-hdr,#sec-inf-trailer .row-sub>td.row-hdr{background:#f5f7f8!important;color:#455a64}
+#sec-inf .row-sub:hover>td,#sec-inf-trailer .row-sub:hover>td{background:#eceff1!important}
+#sec-inf .row-sub:hover>td.row-hdr,#sec-inf-trailer .row-sub:hover>td.row-hdr{background:#eceff1!important}
+/* ── Label Types tab (card grid) ── */
+#sec-lbl .sec-hdr{background:#4a148c}
+.lbl-toolbar{padding:13px 18px;border-bottom:1px solid var(--gray-50);background:#fafafa;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.lbl-search-wrap{position:relative;flex:1;min-width:200px;max-width:380px}
+.lbl-search-wrap input{width:100%;border:1.5px solid var(--gray-50);border-radius:8px;padding:8px 34px 8px 14px;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s;background:#fff}
+.lbl-search-wrap input:focus{border-color:#4a148c;box-shadow:0 0 0 3px rgba(74,20,140,.12)}
+.lbl-search-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--gray-100);font-size:18px;display:none;line-height:1;font-weight:300;border:none;background:none;padding:0}
+.lbl-search-clear:hover{color:var(--gray-160)}
+.lbl-stat-chips{display:flex;gap:7px;align-items:center;margin-left:auto;flex-wrap:wrap}
+.lbl-stat-chip{background:#fff;border:1px solid #ce93d8;border-radius:20px;padding:4px 12px;font-size:11.5px;font-weight:700;color:#4a148c;white-space:nowrap;display:flex;align-items:center;gap:4px}
+.lbl-stat-chip .csn{font-size:15px;font-weight:900}
+.lbl-stat-chip.neutral{border-color:var(--gray-50);color:var(--gray-100)}
+/* Card grid */
+.lbl-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1px;background:var(--gray-50);max-height:620px;overflow-y:auto}
+.lbl-card{background:#fff;display:flex;align-items:stretch;transition:background .12s;cursor:default}
+.lbl-card:hover{background:#f5f0ff}
+.lbl-badge{flex-shrink:0;width:74px;display:flex;align-items:center;justify-content:center;font-family:'Courier New',monospace;font-size:13px;font-weight:900;letter-spacing:.6px;color:#fff;padding:12px 4px}
+.lbl-card-body{flex:1;padding:10px 13px;border-left:1px solid rgba(0,0,0,.055);display:flex;flex-direction:column;justify-content:center;gap:3px}
+.lbl-card-desc{font-size:12.5px;font-weight:600;color:var(--gray-160);line-height:1.4}
+.lbl-card-meta{display:flex;align-items:center;gap:6px;margin-top:2px;flex-wrap:wrap}
+.lbl-card-ref{font-size:10.5px;font-family:'Courier New',monospace;background:#ede7f6;color:#4a148c;padding:1px 6px;border-radius:3px;font-weight:700;letter-spacing:.3px}
+.lbl-card-idx{font-size:10px;color:var(--gray-50);font-weight:700;margin-left:auto}
+.lbl-no-results{padding:48px 24px;text-align:center;color:var(--gray-100);font-size:13px;grid-column:1/-1}
+.lbl-match{background:#fff59d;border-radius:2px;padding:0 1px}
+/* Badge colors by code prefix */
+.lbc-B{background:#1565c0}.lbc-D{background:#512da8}.lbc-E{background:#c62828}
+.lbc-F{background:#00695c}.lbc-I{background:#0277bd}.lbc-L{background:#2a8703}
+.lbc-P{background:#4a148c}.lbc-S{background:#c62828}.lbc-V{background:#455a64}
+.lbc-W{background:#4e342e}.lbc-X{background:#bf360c}.lbc-default{background:#37474f}
+/* SYM expand/collapse rows */
+.row-loc>td{background:#b2dfdb!important;font-weight:800;cursor:pointer;user-select:none}
+.row-loc>td.row-hdr{background:#b2dfdb!important}
+.row-loc:hover>td{background:#80cbc4!important}
+.row-loc:hover>td.row-hdr{background:#80cbc4!important}
+.sym-arrow{display:inline-block;width:14px;margin-right:5px;font-style:normal;transition:transform .18s;color:#004d40}
+.row-sub>td{background:#f0fdfb!important}
+.row-sub>td.row-hdr{background:#f0fdfb!important;padding-left:30px!important;font-style:italic;font-weight:600;color:#00695c}
+.row-sub:hover>td{background:#ccf2ec!important}
+.row-sub:hover>td.row-hdr{background:#ccf2ec!important}
+/* ── Toast ── */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--spark-140);color:#fff;padding:10px 18px;
+  border-radius:8px;font-size:12px;font-weight:600;z-index:999;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+/* ── Insight Panels ── */
+.insight-panel{padding:13px 18px;background:#f0f6ff;border-bottom:1px solid var(--gray-50)}
+.insight-title{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.65px;margin-bottom:9px;display:flex;align-items:center;gap:5px}
+.insight-title.exec{color:var(--blue-100)}
+.insight-kpi{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:2px}
+.kpi-chip{background:#fff;border:1px solid var(--gray-50);border-radius:8px;padding:5px 10px;font-size:11px;display:flex;flex-direction:column;gap:1px;min-width:90px;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+.kpi-chip .kv{font-size:17px;font-weight:800;color:var(--blue-100);line-height:1.1}
+.kpi-chip .kl{font-size:10px;color:var(--gray-100)}
+.kpi-chip.warn .kv{color:var(--red-100)}
+.kpi-chip.ok   .kv{color:var(--green-100)}
+footer{text-align:center;padding:24px;font-size:11px;color:var(--gray-100)}
+</style>
+</head>
+<body>
+
+<!-- Hidden file input — shared by drop-zone and import button -->
+<input type="file" id="file-input" accept=".csv,.xlsx,.xls" style="display:none">
+
+<header class="hdr">
+
+
+  <!-- Title block -->
+  <div class="hdr-title">
+    <h1>UCD - Forecast Dashboard</h1>
+    <div class="hdr-sub">Pick ID Breakdown &middot; Location &middot; Last Operation Tracking</div>
+    <div class="hdr-support">Supported by: Alberto.Villarreal - a3villa</div>
+  </div>
+
+  <!-- Right: timestamps + import button -->
+  <div class="hdr-right">
+    <div class="hdr-timestamps">
+      <div id="hdr-now"></div>
+      <div id="hdr-import-ts"></div>
+    </div>
+    <button class="btn-import" id="btn-import-new" onclick="triggerImport()" style="display:none">
+      📂 Import New File
+    </button>
+    <div class="hdr-source">📁 Source: \\us06016nt800fil.s06016.us.wal-mart.com\Rdrive\Atlas\Forecast</div>
+  </div>
+</header>
+
+<!-- Upload drop zone (shown only before first import) -->
+<div class="upload-area" id="drop-zone" onclick="triggerImport()">
+  <div class="upload-icon">📂</div>
+  <div class="upload-title">Drag and Drop your Atlas UCD Report Here!</div>
+  <div class="upload-sub">or click to browse &middot; large files supported via streaming</div>
+  <div class="upload-note">&#9889; Optimized for 500MB+ files &mdash; no server needed</div>
+</div>
+
+<!-- Progress bar -->
+<div id="progress-wrap">
+  <div class="progress-label"><span id="prog-text">Parsing file&hellip;</span><span id="prog-pct">0%</span></div>
+  <div class="progress-track"><div class="progress-bar" id="prog-bar"></div></div>
+</div>
+
+<div class="tab-nav" id="tab-nav">
+  <button class="tab active" data-tab="dash" onclick="switchTab('dash')">&#128202; Dashboard</button>
+  <button class="tab" data-tab="sv" onclick="switchTab('sv')">&#127919; Today&#39;s SV Projection</button>
+  <button class="tab" data-tab="po" onclick="switchTab('po')">&#9888;&#65039; PO Overages<span id="po-badge"></span></button>
+  <button class="tab" data-tab="sym" onclick="switchTab('sym')">&#128204; SYM_PAC / SYM_VERIFIED</button>
+  <button class="tab" data-tab="inf" onclick="switchTab('inf')">&#127981; In-Facility</button>
+  <button class="tab" data-tab="lbl" onclick="switchTab('lbl')">&#127991; Label Types</button>
+  <button class="tab" data-tab="bp" onclick="switchTab('bp')">&#128230; Breakpack</button>
+  <button class="tab" data-tab="nc" onclick="switchTab('nc')">&#128226; NonCon</button>
+  <button class="tab" data-tab="rw" onclick="switchTab('rw')">&#9999;&#65039; Rewrites</button>
+</div>
+
+<!-- Table 1 -->
+<div class="section hidden" id="sec-t1">
+  <div class="sec-hdr">
+    &#128197; Pick ID Count by Effective Release Date &amp; Label Type Code
+    <span>(rows = Release Date &middot; columns = Label Type Code)</span>
+    <button class="btn btn-export" onclick="exportTable('t1','PickID_by_ReleaseDate')">&#11015; Export CSV</button>
+  </div>
+  <div id="insight-t1"></div>
+  <div class="tbl-wrap"><table id="t1"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-100)"></div><span>Release Date &amp; Days Old in bold red = date is older than 10 days</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#bbdefb;border:1px solid #90caf9"></div><span>Click a Release Date row to expand Container Status breakdown</span></div>
+  </div>
+</div>
+
+<!-- Table 2 -->
+<div class="section hidden" id="sec-t2">
+  <div class="sec-hdr">
+    &#128205; Pick ID Count by Location ID &amp; Label Type Code
+    <span>(rows = Location ID &middot; columns = Label Type Code)</span>
+    <button class="btn btn-export" onclick="exportTable('t2','PickID_by_LocationLabelType')">&#11015; Export CSV</button>
+  </div>
+  <div id="insight-t2"></div>
+  <div class="tbl-wrap"><table id="t2"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#c8ecd3;border:1px solid #a5d6b0"></div><span>Click a Location ID row to expand Release Date breakdown</span></div>
+  </div>
+</div>
+
+<!-- Table 3 -->
+<div class="section hidden" id="sec-t3">
+  <div class="sec-hdr">
+    &#128336; Pick ID Count by Location ID &amp; Last Operation Date
+    <span>(rows = Location ID &middot; columns = Last Op Date mm/dd/yyyy)</span>
+    <button class="btn btn-export" onclick="exportTable('t3','PickID_by_LocationLastOp')">&#11015; Export CSV</button>
+  </div>
+  <div id="insight-t3"></div>
+  <div class="tbl-wrap"><table id="t3"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#ddd0f7;border:1px solid #c4aff0"></div><span>Click a Location ID row to expand Release Date breakdown</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#8b0000"></div><span>Column header = date older than 3 days</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-10);border:1px solid var(--red-100)"></div><span>Cell = old freight count (&gt;3 days)</span></div>
+  </div>
+</div>
+
+<!-- Today's SV Projection Tab -->
+<div class="section hidden" id="sec-sv">
+  <div class="sec-hdr">
+    &#127919; Today&#39;s SV Projection
+    <span>Container status breakdown &amp; SV calculation &mdash; live from imported data</span>
+    <button class="btn" style="background:var(--spark-100);color:var(--gray-160);" onclick="exportSV()">&#11015; Export CSV</button>
+  </div>
+  <div class="sv-body">
+
+
+    <!-- Detail reference table -->
+    <div class="sv-tbl-wrap">
+      <div class="sv-tbl-hdr">&#128202; Full Metric Breakdown</div>
+      <table class="sv-tbl" id="sv-detail-tbl">
+        <colgroup>
+          <col style="width:32px">
+          <col><!-- Metric: fills remaining space -->
+          <col style="width:110px">
+          <col style="width:140px">
+        </colgroup>
+        <thead><tr>
+          <th style="width:32px;text-align:center">#</th>
+          <th>Metric</th>
+          <th style="text-align:right;white-space:nowrap">Count</th>
+          <th style="text-align:right;white-space:nowrap">WHPK Cost</th>
+        </tr></thead>
+        <tbody id="sv-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- PO Overages Tab -->
+<div class="section hidden" id="sec-po">
+  <div class="sec-hdr" style="background:#b05e00">&#9888;&#65039; PO Overages &mdash; PO Line Level Overage(VNPK) &ge; 1
+    <span id="po-count"></span>
+    <button class="btn btn-export" onclick="exportOverages()">&#11015; Export CSV</button>
+  </div>
+  <div class="filter-bar" style="gap:14px">
+    <label>Search:</label>
+    <input id="po-q" type="text" placeholder="Search any column&hellip;" style="width:260px" oninput="OV.q=this.value.toLowerCase();OV.page=0;renderOverages()">
+    <span id="po-pager" style="margin-left:auto;display:flex;align-items:center;gap:6px"></span>
+  </div>
+  <div class="tbl-wrap" style="max-height:540px"><table id="t-po" style="font-size:10.5px"></table></div>
+  <div style="padding:8px 18px;font-size:11px;color:var(--gray-100);border-top:1px solid var(--gray-50)">&#128274; Overage data is cached locally &mdash; persists across refreshes. Re-import to update.</div>
+</div>
+<!-- SYM_PAC / SYM_VERIFIED Tab -->
+<div class="section hidden" id="sec-sym">
+  <div class="sec-hdr">
+    &#128204; Pick ID Count by Location ID &amp; Last Operation Date &mdash; SYM_PAC / SYM_VERIFIED
+    <span>(rows = Location ID &middot; columns = Last Op Date mm/dd/yyyy)</span>
+    <button class="btn btn-export" onclick="exportTable('t-sym','PickID_SYM_Locations')">&#11015; Export CSV</button>
+  </div>
+  <div id="sym-instructions"></div>
+  <div class="tbl-wrap"><table id="t-sym"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#8b0000"></div><span>Column header = date older than 3 days</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-10);border:1px solid var(--red-100)"></div><span>Cell = old freight count (&gt;3 days)</span></div>
+  </div>
+</div>
+
+<!-- SYM_PAC / SYM_VERIFIED — Item Number Tracker (no Repack Container ID) -->
+<div class="section hidden" id="sec-sym2">
+  <div class="sec-hdr">
+    &#128204; Pick ID Count by Item Number &amp; Last Operation Date &mdash; SYM_PAC / SYM_VERIFIED
+    <span>(rows = Item Number &middot; columns = Last Op Date mm/dd/yyyy &middot; no Repack Container ID)</span>
+    <button class="btn btn-export" onclick="exportTable('t-sym-item','PickID_SYM_Items')">&#11015; Export CSV</button>
+  </div>
+  <div class="tbl-wrap"><table id="t-sym-item"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#8b0000"></div><span>Column header = date older than 3 days</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-10);border:1px solid var(--red-100)"></div><span>Cell = old freight count (&gt;3 days)</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#b2dfdb;border:1px solid #80cbc4"></div><span>Click an Item Number row to expand Release Date breakdown</span></div>
+  </div>
+</div>
+
+<!-- SYM_PAC / SYM_VERIFIED — Repack Container ID Tracker -->
+<div class="section hidden" id="sec-sym3">
+  <div class="sec-hdr">
+    &#128204; Pick ID Count by Repack Container ID &amp; Last Operation Date &mdash; SYM_PAC / SYM_VERIFIED
+    <span>(rows = Repack Container ID &middot; columns = Last Op Date mm/dd/yyyy &middot; Last Op &ge; 3 days old)</span>
+    <button class="btn btn-export" onclick="exportTable('t-sym-repack','PickID_SYM_Repacks')">&#11015; Export CSV</button>
+  </div>
+  <div class="tbl-wrap"><table id="t-sym-repack"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#8b0000"></div><span>Column header = date older than 3 days</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-10);border:1px solid var(--red-100)"></div><span>Cell = old freight count (&gt;3 days)</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#b2dfdb;border:1px solid #80cbc4"></div><span>Click a Repack Container ID row to expand Release Date breakdown</span></div>
+  </div>
+</div>
+
+<!-- In-Facility Tab -->
+<div class="section hidden" id="sec-inf">
+  <div class="sec-hdr">
+    &#127981; Pick ID Count by Location ID &amp; Last Operation Date &mdash; IN-FACILITY
+    <span>(rows = Release Date &middot; columns = Last Op Date mm/dd/yyyy)</span>
+    <button class="btn btn-export" onclick="exportTable('t-inf','PickID_InFacility')">&#11015; Export CSV</button>
+  </div>
+  <div class="tbl-wrap"><table id="t-inf"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#8b0000"></div><span>Column header = date older than 3 days</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-10);border:1px solid var(--red-100)"></div><span>Cell = old freight count (&gt;3 days)</span></div>
+  </div>
+</div>
+
+<!-- In-Facility Trailer Breakdown Tab -->
+<div class="section hidden" id="sec-inf-trailer">
+  <div class="sec-hdr">
+    &#128666; Pick ID Count by Trailer ID &amp; Last Operation Date &mdash; IN-FACILITY
+    <span>(rows = Trailer ID / Release Date &middot; columns = Last Op Date mm/dd/yyyy)</span>
+    <button class="btn btn-export" onclick="exportTable('t-inf-trailer','PickID_InFacility_Trailers')">&#11015; Export CSV</button>
+  </div>
+  <div class="tbl-wrap"><table id="t-inf-trailer"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#8b0000"></div><span>Column header = date older than 3 days</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-10);border:1px solid var(--red-100)"></div><span>Cell = old freight count (&gt;3 days)</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#cfd8dc;border:1px solid #90a4ae"></div><span>Click a Trailer ID row to expand Release Date breakdown</span></div>
+  </div>
+</div>
+
+<!-- Label Types Reference Tab -->
+<div class="section hidden" id="sec-lbl">
+  <div class="sec-hdr">
+    &#127991; Label Type Code Reference
+    <span>DC6016 label type codes &mdash; static reference &middot; <span id="lbl-total-count"></span></span>
+    <button class="btn btn-export" style="background:var(--spark-100);color:var(--gray-160)" onclick="exportLbls()">&#11015; Export CSV</button>
+  </div>
+  <div class="lbl-toolbar">
+    <div class="lbl-search-wrap">
+      <input id="lbl-search" type="text" placeholder="&#128269; Search codes or descriptions&hellip;" oninput="filterLbls(this.value)" autocomplete="off">
+      <button class="lbl-search-clear" id="lbl-search-clear" title="Clear" onclick="clearLblSearch()">&times;</button>
+    </div>
+    <div class="lbl-stat-chips">
+      <div class="lbl-stat-chip" id="lbl-count-chip"><span class="csn" id="lbl-count-n">0</span> codes shown</div>
+    </div>
+  </div>
+  <div class="lbl-grid" id="lbl-grid"></div>
+</div>
+
+<!-- Breakpack Tab -->
+<div class="section hidden" id="sec-bp">
+  <div class="sec-hdr">
+    &#128230; Pick ID Count by Location ID &mdash; Fulfillment System: PUT_LIGHT
+    <span id="bp-count"></span>
+    <button class="btn btn-export" onclick="exportBP()">&#11015; Export CSV</button>
+  </div>
+  <div id="insight-bp"></div>
+  <div class="filter-bar">
+    <label>Search Location:</label>
+    <input id="bp-q" type="text" placeholder="Filter by Location ID&hellip;" oninput="renderBP()">
+  </div>
+  <div class="tbl-wrap" style="max-height:540px"><table id="t-bp"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#b2ebf2;border:1px solid #80deea"></div><span>Click a Location ID row to expand Release Date breakdown</span></div>
+  </div>
+</div>
+
+<!-- Breakpack — Oldest Freight Tracker -->
+<div class="section hidden" id="sec-bp2">
+  <div class="sec-hdr">
+    &#128205; PUT_LIGHT Oldest Freight Tracker &mdash; Release Date &amp; Last Known Location
+    <span id="bp2-count"></span>
+    <button class="btn" style="background:var(--spark-100);color:var(--gray-160)" onclick="exportBPDetail()">&#11015; Export CSV</button>
+  </div>
+  <div id="insight-bp2"></div>
+  <div class="filter-bar">
+    <label>Search:</label>
+    <input id="bp2-q" type="text" placeholder="Pick ID, Location ID, or Date&hellip;" style="width:280px"
+           oninput="BD.q=this.value.toLowerCase();BD.page=0;renderBPDetail()">
+    <span id="bp2-pager" style="margin-left:auto;display:flex;align-items:center;gap:6px"></span>
+  </div>
+  <div class="tbl-wrap" style="max-height:520px"><table id="t-bp2" style="font-size:12px"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-10);border:1px solid var(--red-100)"></div><span>Release Date &gt; 10 days old &mdash; investigate immediately</span></div>
+  </div>
+</div>
+
+<!-- NonCon — Summary Table (CP_VOICE / VOICE_PICK) -->
+<div class="section hidden" id="sec-nc">
+  <div class="sec-hdr">
+    &#128226; Pick ID Count by Location ID &mdash; Fulfillment System: CP_VOICE / VOICE_PICK
+    <span id="nc-count"></span>
+    <button class="btn btn-export" onclick="exportNC()">&#11015; Export CSV</button>
+  </div>
+  <div id="insight-nc"></div>
+  <div class="filter-bar">
+    <label>Search Location:</label>
+    <input id="nc-q" type="text" placeholder="Filter by Location ID&hellip;" oninput="renderNC()">
+  </div>
+  <div class="tbl-wrap" style="max-height:540px"><table id="t-nc"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#ffccbc;border:1px solid #ffab91"></div><span>Click a Location ID row to expand Release Date breakdown</span></div>
+  </div>
+</div>
+
+<!-- NonCon — Oldest Freight Tracker -->
+<div class="section hidden" id="sec-nc2">
+  <div class="sec-hdr">
+    &#128205; NonCon Oldest Freight Tracker &mdash; Release Date &amp; Last Known Location
+    <span id="nc2-count"></span>
+    <button class="btn" style="background:var(--spark-100);color:var(--gray-160)" onclick="exportNCDetail()">&#11015; Export CSV</button>
+  </div>
+  <div id="insight-nc2"></div>
+  <div class="filter-bar">
+    <label>Search:</label>
+    <input id="nc2-q" type="text" placeholder="Pick ID, Location ID, or Date&hellip;" style="width:280px"
+           oninput="ND.q=this.value.toLowerCase();ND.page=0;renderNCDetail()">
+    <span id="nc2-pager" style="margin-left:auto;display:flex;align-items:center;gap:6px"></span>
+  </div>
+  <div class="tbl-wrap" style="max-height:520px"><table id="t-nc2" style="font-size:12px"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-10);border:1px solid var(--red-100)"></div><span>Release Date &gt; 10 days old &mdash; investigate immediately</span></div>
+  </div>
+</div>
+
+<!-- Rewrites Tracker (Slot ID = REWRITE) -->
+<div class="section hidden" id="sec-rw">
+  <div class="sec-hdr">
+    &#9999;&#65039; Rewrites Tracker &mdash; Slot ID: REWRITE
+    <span id="rw-count"></span>
+    <button class="btn" style="background:var(--spark-100);color:var(--gray-160)" onclick="exportRW()">&#11015; Export CSV</button>
+  </div>
+  <div id="insight-rw"></div>
+  <div class="filter-bar">
+    <label>Search:</label>
+    <input id="rw-q" type="text" placeholder="Pick ID, Location ID, Label Type, or Date&hellip;" style="width:300px"
+           oninput="RW.q=this.value.toLowerCase();RW.page=0;renderRW()">
+    <span id="rw-pager" style="margin-left:auto;display:flex;align-items:center;gap:6px"></span>
+  </div>
+  <div class="tbl-wrap" style="max-height:520px"><table id="t-rw" style="font-size:12px"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-10);border:1px solid var(--red-100)"></div><span>Release Date &gt; 10 days old &mdash; investigate immediately</span></div>
+  </div>
+</div>
+
+<!-- Rewrites × UserID Pivot (Slot ID = REWRITE) -->
+<div class="section hidden" id="sec-rw-user">
+  <div class="sec-hdr">
+    &#128100; Pick ID Count by Last Op UserID &amp; Last Operation Date &mdash; Slot ID: REWRITE
+    <span>(rows = Last Op UserID &middot; columns = Last Op Date mm/dd/yyyy &middot; click row to expand Release Date breakdown)</span>
+    <button class="btn btn-export" onclick="exportTable('t-rw-user','Rewrites_ByUserID')">&#11015; Export CSV</button>
+  </div>
+  <div class="tbl-wrap"><table id="t-rw-user"></table></div>
+  <div class="legend">
+    <div class="leg-item"><div class="leg-dot" style="background:#8b0000"></div><span>Column header = date older than 3 days</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:var(--red-10);border:1px solid var(--red-100)"></div><span>Cell = count with last op &gt; 3 days old</span></div>
+    <div class="leg-item"><div class="leg-dot" style="background:#ede9fe;border:1px solid #a78bfa"></div><span>Click a UserID row to expand Release Date breakdown</span></div>
+  </div>
+</div>
+</div>
+
+
+<div class="toast" id="toast"></div>
+<footer>Forecast UCD Dashboard &middot; Walmart Supply Chain &middot; <span id="foot-ts"></span></footer>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+const S = {
+  t1:{}, t1cs:{}, t2:{}, t2rel:{}, t3:{}, t3rel:{}, bp:{}, bpRel:{}, bpDetail:{}, nc:{}, ncRel:{}, ncDetail:{},
+  symItem:{}, symItemRel:{}, symRepack:{}, symRepackRel:{},
+  infTrailer:{}, infTrailerRel:{},
+  rwDetail:{}, rwUserPivot:{}, rwUserRel:{},
+  labelTypes: new Set(), opDates: new Set(),
+  relDates: new Set(), locations: new Set(),
+  totalPicks: 0, oldCount: 0, importTs: '',
+  sv: { total:0, totalCost:0, inFacility:0, inFacilityCost:0, symPac:0, symPacCost:0, symVerified:0, symVerifiedCost:0, noMovement:0, noMovementCost:0, touched:0, touchedCost:0 }
+};
+const LS_KEY = 'ucd_dash_v19';
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+const clean = v => {
+  if (!v || v === '--' || v === '""') return '';
+  const m = String(v).match(/^="(.+)"$/);
+  return m ? m[1].trim() : String(v).trim();
+};
+const fmtRelDate = raw => {
+  if (!raw) return '';
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[2]}/${m[3]}/${m[1]}` : raw;
+};
+const extractDate = ts => {
+  if (!ts) return '';
+  const m = ts.match(/^(\d{2}\/\d{2}\/\d{4})/);
+  return m ? m[1] : ts.substring(0, 10);
+};
+const isOld = dateStr => {
+  if (!dateStr) return false;
+  const p = dateStr.split('/');
+  if (p.length !== 3) return false;
+  const d = new Date(+p[2], +p[0]-1, +p[1]);
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.floor((today - d) / 86400000) > 3;
+};
+// Days elapsed from mm/dd/yyyy date to today (negative = future)
+const daysAgo = dateStr => {
+  if (!dateStr) return 0;
+  const p = dateStr.split('/');
+  if (p.length !== 3) return 0;
+  const d = new Date(+p[2], +p[0]-1, +p[1]);
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.floor((today - d) / 86400000);
+};
+const isRelOld = dateStr => daysAgo(dateStr) > 10;
+const fmt = n => n ? n.toLocaleString() : '';
+// Parse mm/dd/yyyy → comparable timestamp (returns 0 for unparseable)
+const parseMDY = s => {
+  if (!s) return 0;
+  const p = s.split('/');
+  return p.length === 3 ? new Date(+p[2], +p[0]-1, +p[1]).getTime() : 0;
+};
+const fmtTs = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})
+                  + ' ' + d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+
+function toast(msg, dur=3000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), dur);
+}
+
+// ── localStorage persistence ───────────────────────────────────────────────
+// Tiered save: try full payload first; if quota is exceeded fall back to
+// metadata-only (importTs / totalPicks / oldCount) so the console stays clean.
+function saveState() {
+  const fullPayload = {
+    t1: S.t1, t1cs: S.t1cs, t2: S.t2, t2rel: S.t2rel, t3: S.t3, t3rel: S.t3rel, bp: S.bp, bpRel: S.bpRel, bpDetail: S.bpDetail, nc: S.nc, ncRel: S.ncRel, ncDetail: S.ncDetail,
+    symItem: S.symItem, symItemRel: S.symItemRel, symRepack: S.symRepack, symRepackRel: S.symRepackRel,
+    infTrailer: S.infTrailer, infTrailerRel: S.infTrailerRel,
+    rwDetail: S.rwDetail, rwUserPivot: S.rwUserPivot, rwUserRel: S.rwUserRel,
+    labelTypes: [...S.labelTypes], opDates: [...S.opDates],
+    relDates: [...S.relDates], locations: [...S.locations],
+    totalPicks: S.totalPicks, oldCount: S.oldCount, importTs: S.importTs,
+    ovRows: OV.rows, sv: S.sv
+  };
+  const metaPayload = {
+    totalPicks: S.totalPicks, oldCount: S.oldCount, importTs: S.importTs
+  };
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(fullPayload));
+  } catch(_) {
+    // Full payload exceeded quota — persist lightweight metadata only.
+    try {
+      localStorage.removeItem(LS_KEY);          // clear stale/partial data first
+      localStorage.setItem(LS_KEY, JSON.stringify(metaPayload));
+      toast('⚠️ Dataset too large to fully cache — re-import required on refresh.', 5000);
+    } catch(_2) {
+      // Storage completely unavailable — silently skip caching.
+      try { localStorage.removeItem(LS_KEY); } catch(_3) {}
+    }
+  }
+}
+
+function tryLoadSaved() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return false;
+    const p = JSON.parse(raw);
+    // Full payload: restore all tables and let the dashboard render.
+    if (p.t1 && Object.keys(p.t1).length) {
+      S.t1 = p.t1||{}; S.t1cs = p.t1cs||{}; S.t2 = p.t2||{}; S.t2rel = p.t2rel||{}; S.t3 = p.t3||{}; S.t3rel = p.t3rel||{};
+      S.bp = p.bp||{}; S.bpRel = p.bpRel||{}; S.bpDetail = p.bpDetail||{};
+      S.nc = p.nc||{}; S.ncRel = p.ncRel||{}; S.ncDetail = p.ncDetail||{};
+      S.symItem = p.symItem||{}; S.symItemRel = p.symItemRel||{};
+      S.symRepack = p.symRepack||{}; S.symRepackRel = p.symRepackRel||{};
+      S.infTrailer = p.infTrailer||{}; S.infTrailerRel = p.infTrailerRel||{};
+      S.rwDetail = p.rwDetail||{}; S.rwUserPivot = p.rwUserPivot||{}; S.rwUserRel = p.rwUserRel||{};
+      S.labelTypes = new Set(p.labelTypes || []);
+      S.opDates    = new Set(p.opDates || []);
+      S.relDates   = new Set(p.relDates || []);
+      S.locations  = new Set(p.locations || []);
+      S.totalPicks = p.totalPicks || 0;
+      S.oldCount   = p.oldCount   || 0;
+      S.importTs   = p.importTs   || '';
+      OV.rows      = p.ovRows     || [];
+      S.sv = p.sv || { total:0, totalCost:0, inFacility:0, inFacilityCost:0, symPac:0, symPacCost:0, symVerified:0, symVerifiedCost:0, noMovement:0, noMovementCost:0, touched:0, touchedCost:0 };
+      return true;
+    }
+    // Metadata-only payload: inform user a re-import is needed.
+    if (p.importTs) {
+      toast(`📅 Last import: ${p.importTs} — please re-import CSV to view data.`, 6000);
+    }
+    return false;
+  } catch(e) { return false; }
+}
+
+function resetState() {
+  S.t1={}; S.t1cs={}; S.t2={}; S.t2rel={}; S.t3={}; S.t3rel={};
+  S.bp={}; S.bpRel={}; S.bpDetail={};
+  S.nc={}; S.ncRel={}; S.ncDetail={};
+  S.symItem={}; S.symItemRel={};
+  S.symRepack={}; S.symRepackRel={};
+  S.infTrailer={}; S.infTrailerRel={};
+  S.rwDetail={}; S.rwUserPivot={}; S.rwUserRel={};
+  BD.page=0; BD.q=''; if(document.getElementById('bp2-q')) document.getElementById('bp2-q').value='';
+  ND.page=0; ND.q=''; if(document.getElementById('nc2-q')) document.getElementById('nc2-q').value='';
+  RW.page=0; RW.q=''; RW.sortCol='relDate'; RW.sortDir=1; if(document.getElementById('rw-q'))  document.getElementById('rw-q').value='';
+  S.labelTypes=new Set(); S.opDates=new Set();
+  S.relDates=new Set(); S.locations=new Set();
+  S.totalPicks=0; S.oldCount=0; S.importTs='';
+  S.sv={ total:0, totalCost:0, inFacility:0, inFacilityCost:0, symPac:0, symPacCost:0, symVerified:0, symVerifiedCost:0, noMovement:0, noMovementCost:0, touched:0, touchedCost:0 };
+  OV.rows=[]; OV.page=0; OV.q=''; if(document.getElementById('po-q')) document.getElementById('po-q').value='';
+}
+
+// ── Process row ────────────────────────────────────────────────────────────
+function processRow(row) {
+  const pickId = clean(row['Pick ID']);
+  if (!pickId) return;
+  const relDate = fmtRelDate(clean(row['Effective Release Date']));
+  const locId   = clean(row['Location ID']);
+  const ltc     = clean(row['Label Type Code']);
+  const opDate  = extractDate(clean(row['Last Operation Timestamp']));
+  const cs      = (clean(row['Container Status']) || '').toUpperCase();
+
+  S.totalPicks++;
+  if (locId)   S.locations.add(locId);
+  if (ltc)     S.labelTypes.add(ltc);
+  if (relDate) S.relDates.add(relDate);
+  if (opDate)  { S.opDates.add(opDate); if (isOld(opDate)) S.oldCount++; }
+
+  // ── SV Projection tallies ──
+  const locU          = locId.toUpperCase();                    // clean() always returns a string
+  const relAge        = relDate ? daysAgo(relDate) : -1;
+  const opAge         = opDate  ? daysAgo(opDate)  : -1;
+  const isOldRel      = relAge >= 10;                          // release date ≥ 10 days old
+  const isOldOp       = opAge  >= 3;                           // last op timestamp ≥ 3 days old
+  const isAllocPicked = cs === 'ALLOCATED' || cs === 'PICKED';
+  const whpkCost      = parseFloat(clean(row['WHPK Cost'])) || 0;
+
+  // Total Picks:   CS=ALLOC/PICKED + release ≥10d
+  if (isAllocPicked && isOldRel) { S.sv.total++;       S.sv.totalCost       += whpkCost; }
+  // In-Facility:   Loc=IN-FACILITY + CS=ALLOC/PICKED + release ≥10d + last op ≥3d
+  if (locU === 'IN-FACILITY'  && isAllocPicked && isOldRel && isOldOp) { S.sv.inFacility++;  S.sv.inFacilityCost  += whpkCost; }
+  // SYM_PAC:       Loc=SYM_PAC + CS=ALLOC/PICKED + release ≥10d + last op ≥3d
+  if (locU === 'SYM_PAC'      && isAllocPicked && isOldRel && isOldOp) { S.sv.symPac++;      S.sv.symPacCost      += whpkCost; }
+  // SYM_VERIFIED:  Loc=SYM_VERIFIED + CS=ALLOC/PICKED + release ≥10d + last op ≥3d
+  if (locU === 'SYM_VERIFIED' && isAllocPicked && isOldRel && isOldOp) { S.sv.symVerified++; S.sv.symVerifiedCost += whpkCost; }
+  // Movement: ALLOC/PICKED + release ≥10d (opAge already computed above)
+  if (isAllocPicked && isOldRel && opDate) {
+    if (opAge >= 3) { S.sv.noMovement++; S.sv.noMovementCost += whpkCost; }
+    else            { S.sv.touched++;    S.sv.touchedCost    += whpkCost; }
+  }
+
+  if (relDate && ltc)
+    (S.t1[relDate]=S.t1[relDate]||{})[ltc] = (S.t1[relDate][ltc]||0)+1;
+  if (relDate && ltc) {
+    const csDisplay = clean(row['Container Status']) || '(No Status)';
+    if (!S.t1cs[relDate]) S.t1cs[relDate] = {};
+    if (!S.t1cs[relDate][csDisplay]) S.t1cs[relDate][csDisplay] = {};
+    S.t1cs[relDate][csDisplay][ltc] = (S.t1cs[relDate][csDisplay][ltc] || 0) + 1;
+  }
+  if (locId && ltc) {
+    (S.t2[locId]=S.t2[locId]||{})[ltc] = (S.t2[locId][ltc]||0)+1;
+    if (relDate) {
+      if (!S.t2rel[locId]) S.t2rel[locId] = {};
+      if (!S.t2rel[locId][relDate]) S.t2rel[locId][relDate] = {};
+      S.t2rel[locId][relDate][ltc] = (S.t2rel[locId][relDate][ltc]||0)+1;
+    }
+  }
+  if (locId && opDate)
+    (S.t3[locId]=S.t3[locId]||{})[opDate] = (S.t3[locId][opDate]||0)+1;
+  if (locId && relDate && opDate) {
+    if (!S.t3rel[locId]) S.t3rel[locId] = {};
+    if (!S.t3rel[locId][relDate]) S.t3rel[locId][relDate] = {};
+    S.t3rel[locId][relDate][opDate] = (S.t3rel[locId][relDate][opDate]||0)+1;
+  }
+  // SYM Item tracking: SYM_PAC or SYM_VERIFIED, no Repack Container ID, Last Op >= 3 days old
+  const repackId = clean(row['Repack Container ID']);
+  const itemNum  = clean(row['Item Number']);
+  if ((locU === 'SYM_PAC' || locU === 'SYM_VERIFIED') && !repackId && itemNum && opDate && isOld(opDate)) {
+    (S.symItem[itemNum] = S.symItem[itemNum] || {})[opDate] = (S.symItem[itemNum][opDate] || 0) + 1;
+    if (relDate) {
+      if (!S.symItemRel[itemNum]) S.symItemRel[itemNum] = {};
+      if (!S.symItemRel[itemNum][relDate]) S.symItemRel[itemNum][relDate] = {};
+      S.symItemRel[itemNum][relDate][opDate] = (S.symItemRel[itemNum][relDate][opDate] || 0) + 1;
+    }
+  }
+  // SYM Repack tracking: SYM_PAC or SYM_VERIFIED, Repack Container ID present, Last Op >= 3 days old
+  if ((locU === 'SYM_PAC' || locU === 'SYM_VERIFIED') && repackId && opDate && isOld(opDate)) {
+    (S.symRepack[repackId] = S.symRepack[repackId] || {})[opDate] = (S.symRepack[repackId][opDate] || 0) + 1;
+    if (relDate) {
+      if (!S.symRepackRel[repackId]) S.symRepackRel[repackId] = {};
+      if (!S.symRepackRel[repackId][relDate]) S.symRepackRel[repackId][relDate] = {};
+      S.symRepackRel[repackId][relDate][opDate] = (S.symRepackRel[repackId][relDate][opDate] || 0) + 1;
+    }
+  }
+  // Breakpack (PUT_LIGHT) accumulation
+  const fulfSys = (clean(row['Fulfillment System']) || '').toUpperCase();
+  if (locId && fulfSys === 'PUT_LIGHT') {
+    S.bp[locId] = (S.bp[locId] || 0) + 1;
+    if (relDate) {
+      if (!S.bpRel[locId]) S.bpRel[locId] = {};
+      S.bpRel[locId][relDate] = (S.bpRel[locId][relDate] || 0) + 1;
+    }
+    // Detail: one record per Pick ID — keep the entry with the latest operation timestamp.
+    if (pickId) {
+      const opTs    = clean(row['Last Operation Timestamp']);
+      const existing = S.bpDetail[pickId];
+      if (!existing || opTs > (existing.opTs || '')) {
+        S.bpDetail[pickId] = { relDate, locId, opTs, opUserId: clean(row['Last Operation UserID']) };
+      }
+    }
+  }
+  // NonCon (CP_VOICE / VOICE_PICK) accumulation
+  if (locId && (fulfSys === 'CP_VOICE' || fulfSys === 'VOICE_PICK')) {
+    S.nc[locId] = (S.nc[locId] || 0) + 1;
+    if (relDate) {
+      if (!S.ncRel[locId]) S.ncRel[locId] = {};
+      S.ncRel[locId][relDate] = (S.ncRel[locId][relDate] || 0) + 1;
+    }
+    if (pickId) {
+      const opTs     = clean(row['Last Operation Timestamp']);
+      const existing  = S.ncDetail[pickId];
+      if (!existing || opTs > (existing.opTs || '')) {
+        S.ncDetail[pickId] = { relDate, locId, opTs, opUserId: clean(row['Last Operation UserID']) };
+      }
+    }
+  }
+  // Rewrites: Slot ID = REWRITE — deduplicate by Pick ID, keep latest opTs
+  if (clean(row['Slot ID']).toUpperCase() === 'REWRITE' && pickId) {
+    const rwOpTs = clean(row['Last Operation Timestamp']);
+    const existing = S.rwDetail[pickId];
+    if (!existing || rwOpTs > (existing.opTs || '')) {
+      S.rwDetail[pickId] = { relDate, locId, ltc, opUserId: clean(row['Last Operation UserID']), opTs: rwOpTs };
+    }
+    // UserID pivot: rwUserPivot[userId][opDate] = count, rwUserRel[userId][relDate][opDate] = count
+    const rwUser = clean(row['Last Operation UserID']) || '(No UserID)';
+    if (opDate) {
+      if (!S.rwUserPivot[rwUser]) S.rwUserPivot[rwUser] = {};
+      S.rwUserPivot[rwUser][opDate] = (S.rwUserPivot[rwUser][opDate] || 0) + 1;
+      if (relDate) {
+        if (!S.rwUserRel[rwUser]) S.rwUserRel[rwUser] = {};
+        if (!S.rwUserRel[rwUser][relDate]) S.rwUserRel[rwUser][relDate] = {};
+        S.rwUserRel[rwUser][relDate][opDate] = (S.rwUserRel[rwUser][relDate][opDate] || 0) + 1;
+      }
+    }
+  }
+
+  // IN-FACILITY Trailer tracking: group Pick IDs by Inbound Trailer ID when Location = IN-FACILITY
+  const inboundTrailer = clean(row['Inbound Trailer ID']);
+  if (locU === 'IN-FACILITY' && inboundTrailer && opDate) {
+    (S.infTrailer[inboundTrailer] = S.infTrailer[inboundTrailer] || {})[opDate] =
+      (S.infTrailer[inboundTrailer][opDate] || 0) + 1;
+    if (relDate) {
+      if (!S.infTrailerRel[inboundTrailer]) S.infTrailerRel[inboundTrailer] = {};
+      if (!S.infTrailerRel[inboundTrailer][relDate]) S.infTrailerRel[inboundTrailer][relDate] = {};
+      S.infTrailerRel[inboundTrailer][relDate][opDate] =
+        (S.infTrailerRel[inboundTrailer][relDate][opDate] || 0) + 1;
+    }
+  }
+  // PO Overage capture
+  const ov = parseFloat(clean(row['PO Line Level Overage(VNPK)']));
+  if (!isNaN(ov) && ov >= 1) OV.rows.push([
+    locId,                                             clean(row['Effective Release Date']) ? fmtRelDate(clean(row['Effective Release Date'])) : '',
+    clean(row['Container Status']),                    clean(row['PO Number']),               ov,
+    clean(row['Ordered Qty(VNPK)']),                   clean(row['Received Qty(VNPK)']),      clean(row['PO Line Number']),
+    clean(row['Delivery Number']),                     clean(row['Last Operation UserID']),   clean(row['Last Operation Timestamp']),
+    clean(row['Slot ID']),                             clean(row['Inbound Trailer ID']),      clean(row['Fulfillment System']),
+    clean(row['Item Number']),                         clean(row['Item Description']),
+    clean(row['Label Type Code']),                     clean(row['Induct Label ID']),         pickId
+  ]);
+}
+
+// ── Build pivot table ── rowSort: alpha|total-desc|oldest-date · tblId enables col-click sort
+function buildPivot(data, rowFilter, colIsOld, rowLabel='Row', rowSort='alpha', colChron=false, tblId='') {
+  let rows = Object.keys(data).filter(r => !rowFilter || r.toLowerCase().includes(rowFilter.toLowerCase()));
+  const allCols = [...new Set(Object.values(data).flatMap(Object.keys))];
+  const cols = colChron ? allCols.slice().sort((a,b)=>parseMDY(a)-parseMDY(b)) : allCols.slice().sort();
+  const rowTotal = r => cols.reduce((s,c)=>s+(data[r][c]||0),0);
+  const ps = tblId && PS[tblId];
+  if (ps && ps.col) rows.sort((a,b)=>ps.dir*((data[b][ps.col]||0)-(data[a][ps.col]||0)));
+  else if (rowSort==='total-desc') rows.sort((a,b)=>rowTotal(b)-rowTotal(a));
+  else if (rowSort==='oldest-date') {
+    const ear=r=>{const d=cols.filter(c=>(data[r][c]||0)>0);return d.length?Math.min(...d.map(parseMDY)):Infinity;};
+    rows.sort((a,b)=>{const da=ear(a),db=ear(b);return da!==db?da-db:rowTotal(b)-rowTotal(a);});
+  } else rows.sort();
+  const colGrand={};
+  let html=`<thead><tr><th class="row-hdr">${rowLabel}</th>`;
+  cols.forEach(c=>{
+    const old=colIsOld&&isOld(c);
+    const ind=ps&&ps.col===c?(ps.dir<0?' &#9660;':' &#9650;'):'';
+    const clk=tblId?` onclick="pSort('${tblId}','${c}')" style="cursor:pointer"`:'';
+    html+=`<th${old?' class="old-hdr"':''}${clk}>${c}${ind}</th>`;
+  });
+  html+='<th>Total</th></tr></thead><tbody>';
+  let grandTotal=0;
+  rows.forEach(r=>{
+    const rv=data[r];let rowSum=0;let cells='';
+    cols.forEach(c=>{
+      const v=rv[c]||0;rowSum+=v;colGrand[c]=(colGrand[c]||0)+v;
+      const old=colIsOld&&isOld(c)&&v>0;
+      cells+=`<td${old?' class="old-cell"':''}>${v>0?fmt(v):''}</td>`;
+    });
+    grandTotal+=rowSum;
+    html+=`<tr><td class="row-hdr">${r}</td>${cells}<td><strong>${fmt(rowSum)}</strong></td></tr>`;
+  });
+  html+=`<tr class="row-total"><td class="row-hdr">TOTAL</td>`;
+  cols.forEach(c=>{html+=`<td>${fmt(colGrand[c]||0)}</td>`;});
+  html+=`<td>${fmt(grandTotal)}</td></tr></tbody>`;
+  return html;
+}
+
+// ── Render tables ──────────────────────────────────────────────────────────
+// T1: custom builder — adds Days Old column + Container Status sub-rows + >10-day bold-red highlighting
+function renderT1() {
+  const rows = Object.keys(S.t1).sort((a, b) => parseMDY(a) - parseMDY(b));
+  const colSet = new Set();
+  rows.forEach(r => Object.keys(S.t1[r]).forEach(c => colSet.add(c)));
+  const cols = [...colSet].sort();
+  const colGrand = {};
+
+  // thead — Release Date | Days Old | [LTC cols…] | Total
+  let html = '<thead><tr>'
+    + '<th class="row-hdr">Release Date</th>'
+    + '<th class="days-hdr">Days Old</th>';
+  cols.forEach(c => { html += `<th>${c}</th>`; });
+  html += '<th>Total</th></tr></thead><tbody>';
+
+  let grandTotal = 0;
+  rows.forEach(r => {
+    const days   = daysAgo(r);
+    const old    = days > 10;
+    const rv     = S.t1[r];
+    const csData = S.t1cs[r] || {};
+    const key    = r.replace(/[^A-Za-z0-9]/g, '_'); // e.g. 04_01_2026
+    let rowSum   = 0;
+    let cells    = '';
+    cols.forEach(c => {
+      const v = rv[c] || 0;
+      rowSum += v;
+      colGrand[c] = (colGrand[c] || 0) + v;
+      cells += `<td>${v > 0 ? fmt(v) : ''}</td>`;
+    });
+    grandTotal += rowSum;
+    const daysLabel = days === 1 ? '1 day' : `${days} days`;
+    const rowCls = ['row-loc', old ? 'rel-old' : ''].filter(Boolean).join(' ');
+
+    // parent row
+    html += `<tr class="${rowCls}" onclick="locToggle('t1','${key}')">`
+      + `<td class="row-hdr"><span class="sym-arrow" id="arr-${key}">▶</span>${r}</td>`
+      + `<td class="days-cell">${daysLabel}</td>`
+      + `${cells}`
+      + `<td><strong>${fmt(rowSum)}</strong></td></tr>`;
+
+    // Container Status sub-rows, sorted alphabetically
+    Object.keys(csData).sort().forEach(cs => {
+      const csd = csData[cs];
+      let csSum  = 0;
+      let csCells = '';
+      cols.forEach(c => {
+        const v = csd[c] || 0;
+        csSum += v;
+        csCells += `<td>${v > 0 ? fmt(v) : ''}</td>`;
+      });
+      html += `<tr class="row-sub" data-loc="${key}" data-tbl="t1" style="display:none">`
+        + `<td class="row-hdr">↳ ${cs}</td>`
+        + `<td class="days-cell"></td>`
+        + `${csCells}`
+        + `<td><strong>${fmt(csSum)}</strong></td></tr>`;
+    });
+  });
+
+  // grand total row
+  html += '<tr class="row-total"><td class="row-hdr">TOTAL</td>'
+    + '<td class="days-cell" style="color:inherit;font-weight:800">—</td>';
+  cols.forEach(c => { html += `<td>${fmt(colGrand[c] || 0)}</td>`; });
+  html += `<td>${fmt(grandTotal)}</td></tr></tbody>`;
+
+  document.getElementById('t1').innerHTML = html;
+  buildInsightT1();
+}
+function renderT2() {
+  const rows = Object.keys(S.t2);
+  if (!rows.length) { document.getElementById('t2').innerHTML = ''; buildInsightT2(); return; }
+  const colSet = new Set();
+  rows.forEach(r => Object.keys(S.t2[r]).forEach(c => colSet.add(c)));
+  const cols = [...colSet].sort();
+  const ps = PS['t2'];
+  const rowTotal = r => cols.reduce((s, c) => s + (S.t2[r][c] || 0), 0);
+  let sortedRows = rows.slice();
+  if (ps && ps.col === '__loc__')   sortedRows.sort((a, b) => ps.dir * a.localeCompare(b));
+  else if (ps && ps.col === '__total__') sortedRows.sort((a, b) => ps.dir * (rowTotal(b) - rowTotal(a)));
+  else if (ps && ps.col)            sortedRows.sort((a, b) => ps.dir * ((S.t2[b][ps.col] || 0) - (S.t2[a][ps.col] || 0)));
+  else                              sortedRows.sort((a, b) => rowTotal(b) - rowTotal(a));
+
+  const indFor = key => ps && ps.col === key ? (ps.dir < 0 ? ' &#9660;' : ' &#9650;') : '';
+  let html = '<thead><tr>'
+    + `<th class="row-hdr" onclick="pSort('t2','__loc__')" style="cursor:pointer">Location ID${indFor('__loc__')}</th>`;
+  cols.forEach(c => {
+    html += `<th onclick="pSort('t2','${c}')" style="cursor:pointer">${c}${indFor(c)}</th>`;
+  });
+  html += `<th onclick="pSort('t2','__total__')" style="cursor:pointer">Total${indFor('__total__')}</th>`
+    + '</tr></thead><tbody>';
+
+  const colGrand = {}; let grandTotal = 0;
+  sortedRows.forEach(r => {
+    const key = r.replace(/[^A-Za-z0-9]/g, '_');
+    const rv = S.t2[r]; const relData = S.t2rel[r] || {};
+    let rowSum = 0; let cells = '';
+    cols.forEach(c => {
+      const v = rv[c] || 0; rowSum += v;
+      colGrand[c] = (colGrand[c] || 0) + v;
+      cells += `<td>${v > 0 ? fmt(v) : ''}</td>`;
+    });
+    grandTotal += rowSum;
+    html += `<tr class="row-loc" onclick="locToggle('t2','${key}')">`
+      + `<td class="row-hdr"><span class="sym-arrow" id="arr-t2-${key}">▶</span>${r}</td>`
+      + `${cells}<td><strong>${fmt(rowSum)}</strong></td></tr>`;
+    Object.keys(relData).sort((a, b) => parseMDY(a) - parseMDY(b)).forEach(rel => {
+      const rd = relData[rel]; let relSum = 0; let relCells = '';
+      cols.forEach(c => { const v = rd[c] || 0; relSum += v; relCells += `<td>${v > 0 ? fmt(v) : ''}</td>`; });
+      html += `<tr class="row-sub" data-loc="${key}" data-tbl="t2" style="display:none">`
+        + `<td class="row-hdr">↳ ${rel}</td>${relCells}<td><strong>${fmt(relSum)}</strong></td></tr>`;
+    });
+  });
+  html += '<tr class="row-total"><td class="row-hdr">TOTAL</td>';
+  cols.forEach(c => { html += `<td>${fmt(colGrand[c] || 0)}</td>`; });
+  html += `<td>${fmt(grandTotal)}</td></tr></tbody>`;
+  document.getElementById('t2').innerHTML = html;
+  buildInsightT2();
+}
+
+function renderT3() {
+  const rows = Object.keys(S.t3);
+  if (!rows.length) { document.getElementById('t3').innerHTML = ''; buildInsightT3(); return; }
+  const colSet = new Set();
+  rows.forEach(r => Object.keys(S.t3[r]).forEach(c => colSet.add(c)));
+  const ps = PS['t3'];
+  const isDataCol = ps && ps.col && ps.col !== '__loc__' && ps.col !== '__total__';
+  const cols = isDataCol
+    ? [...colSet].sort()
+    : [...colSet].sort((a, b) => parseMDY(a) - parseMDY(b));
+  const rowTotal = r => cols.reduce((s, c) => s + (S.t3[r][c] || 0), 0);
+  let sortedRows = rows.slice();
+  if (ps && ps.col === '__loc__')        sortedRows.sort((a, b) => ps.dir * a.localeCompare(b));
+  else if (ps && ps.col === '__total__') sortedRows.sort((a, b) => ps.dir * (rowTotal(b) - rowTotal(a)));
+  else if (isDataCol)                    sortedRows.sort((a, b) => ps.dir * ((S.t3[b][ps.col] || 0) - (S.t3[a][ps.col] || 0)));
+  else {
+    const ear = r => { const d = cols.filter(c => (S.t3[r][c] || 0) > 0); return d.length ? Math.min(...d.map(parseMDY)) : Infinity; };
+    sortedRows.sort((a, b) => { const da = ear(a), db = ear(b); return da !== db ? da - db : rowTotal(b) - rowTotal(a); });
+  }
+
+  const indFor = key => ps && ps.col === key ? (ps.dir < 0 ? ' &#9660;' : ' &#9650;') : '';
+  let html = '<thead><tr>'
+    + `<th class="row-hdr" onclick="pSort('t3','__loc__')" style="cursor:pointer">Location ID${indFor('__loc__')}</th>`;
+  cols.forEach(c => {
+    const old = isOld(c);
+    html += `<th${old ? ' class="old-hdr"' : ''} onclick="pSort('t3','${c}')" style="cursor:pointer">${c}${indFor(c)}</th>`;
+  });
+  html += `<th onclick="pSort('t3','__total__')" style="cursor:pointer">Total${indFor('__total__')}</th>`
+    + '</tr></thead><tbody>';
+
+  const colGrand = {}; let grandTotal = 0;
+  sortedRows.forEach(r => {
+    const key = r.replace(/[^A-Za-z0-9]/g, '_');
+    const locData = S.t3[r]; const relData = S.t3rel[r] || {};
+    let rowSum = 0; let cells = '';
+    cols.forEach(c => {
+      const v = locData[c] || 0; rowSum += v;
+      colGrand[c] = (colGrand[c] || 0) + v;
+      cells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+    });
+    grandTotal += rowSum;
+    html += `<tr class="row-loc" onclick="locToggle('t3','${key}')">`
+      + `<td class="row-hdr"><span class="sym-arrow" id="arr-t3-${key}">▶</span>${r}</td>`
+      + `${cells}<td><strong>${fmt(rowSum)}</strong></td></tr>`;
+    Object.keys(relData).sort((a, b) => parseMDY(a) - parseMDY(b)).forEach(rel => {
+      const rd = relData[rel]; let relSum = 0; let relCells = '';
+      cols.forEach(c => { const v = rd[c] || 0; relSum += v; relCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`; });
+      html += `<tr class="row-sub" data-loc="${key}" data-tbl="t3" style="display:none">`
+        + `<td class="row-hdr">↳ ${rel}</td>${relCells}<td><strong>${fmt(relSum)}</strong></td></tr>`;
+    });
+  });
+  html += '<tr class="row-total"><td class="row-hdr">TOTAL</td>';
+  cols.forEach(c => { html += `<td${isOld(c) ? ' class="old-cell"' : ''}>${fmt(colGrand[c] || 0)}</td>`; });
+  html += `<td>${fmt(grandTotal)}</td></tr></tbody>`;
+  document.getElementById('t3').innerHTML = html;
+  buildInsightT3();
+}
+// --- Insight Panel Helpers ---
+function insightPanel(panelId, kpiHtml) {
+  const el = document.getElementById(panelId);
+  if (!el) return;
+  el.innerHTML = '<div class="insight-panel">' +
+    '<div class="insight-title exec">&#128202; Executive Insights</div>' +
+    '<div class="insight-kpi">' + kpiHtml + '</div>' +
+  '</div>';
+}
+function chip(label, value, state) {
+  state = state || '';
+  return '<div class="kpi-chip ' + state + '"><span class="kv">' + value + '</span><span class="kl">' + label + '</span></div>';
+}
+
+const PS = {t2:{col:null,dir:-1}, t3:{col:null,dir:-1}, tsym:{col:null,dir:-1}, tsymItem:{col:null,dir:-1}, tsymRepack:{col:null,dir:-1}, tinfTrailer:{col:null,dir:-1}, trwUser:{col:null,dir:-1}};
+
+function buildInsightT1() {
+  var dates = Object.keys(S.t1);
+  if (!dates.length) return;
+  var grandTotal = dates.reduce(function(s,d){return s+Object.values(S.t1[d]).reduce(function(a,b){return a+b;},0);},0);
+  var oldDates = dates.filter(function(d){return isRelOld(d);});
+  var ltcTotals = {};
+  dates.forEach(function(d){Object.entries(S.t1[d]).forEach(function(e){ltcTotals[e[0]]=(ltcTotals[e[0]]||0)+e[1];});});
+  var ltcArr = Object.entries(ltcTotals).sort(function(a,b){return b[1]-a[1];})[0]||['--',0];
+  var topLTCName=ltcArr[0], topLTCVal=ltcArr[1];
+  var topPct = grandTotal?Math.round((topLTCVal/grandTotal)*100):0;
+  var sortedDts = dates.slice().sort(function(a,b){return parseMDY(a)-parseMDY(b);});
+  var spanDays = sortedDts.length>1?Math.round((parseMDY(sortedDts[sortedDts.length-1])-parseMDY(sortedDts[0]))/86400000):0;
+  var kpis = [
+    chip('Total Pick IDs',fmt(grandTotal),''),
+    chip('Release Dates',dates.length,''),
+    chip('Stale Dates (>10d)',oldDates.length,oldDates.length>0?'warn':'ok'),
+    chip('Top Label Type',topLTCName+' ('+topPct+'%)',topPct>=60?'warn':''),
+    chip('Date Span',spanDays>0?spanDays+'d':'--',spanDays>14?'warn':'')
+  ].join('');
+  insightPanel('insight-t1',kpis);
+}
+
+function buildInsightT2() {
+  var locs = Object.keys(S.t2);
+  if (!locs.length) return;
+  var locTotals = locs.map(function(l){return [l,Object.values(S.t2[l]).reduce(function(a,b){return a+b;},0)];});
+  var grandTotal = locTotals.reduce(function(s,e){return s+e[1];},0);
+  var topLoc = locTotals.slice().sort(function(a,b){return b[1]-a[1];})[0]||['--',0];
+  var topLocName=topLoc[0], topLocVal=topLoc[1];
+  var topLocPct = grandTotal?Math.round((topLocVal/grandTotal)*100):0;
+  var ltcTotals={};
+  locs.forEach(function(l){Object.entries(S.t2[l]).forEach(function(e){ltcTotals[e[0]]=(ltcTotals[e[0]]||0)+e[1];});});
+  var topLTCName=(Object.entries(ltcTotals).sort(function(a,b){return b[1]-a[1];})[0]||['--'])[0];
+  var ltcCount=Object.keys(ltcTotals).length;
+  var singletonLocs=locTotals.filter(function(e){return e[1]<=5;}).length;
+  var kpis=[
+    chip('Active Locations',locs.length,''),
+    chip('Total Pick IDs',fmt(grandTotal),''),
+    chip('Top Location',topLocName+' ('+topLocPct+'%)',topLocPct>=40?'warn':''),
+    chip('Label Types in Use',ltcCount,ltcCount>10?'warn':''),
+    chip('Dominant LTC',topLTCName,'')
+  ].join('');
+  insightPanel('insight-t2',kpis);
+}
+
+function buildInsightT3() {
+  var locs = Object.keys(S.t3);
+  if (!locs.length) return;
+  var allDates=[...new Set(locs.flatMap(function(l){return Object.keys(S.t3[l]);}))]; 
+  var oldDates=allDates.filter(function(d){return isOld(d);});
+  var oldPicks=locs.reduce(function(s,l){return s+oldDates.reduce(function(a,d){return a+(S.t3[l][d]||0);},0);},0);
+  var grandTotal=locs.reduce(function(s,l){return s+Object.values(S.t3[l]).reduce(function(a,b){return a+b;},0);},0);
+  var staleLocs=locs.filter(function(l){return Object.keys(S.t3[l]).some(function(d){return isOld(d);});});
+  var oldPct=grandTotal?Math.round((oldPicks/grandTotal)*100):0;
+  var sortedDts=allDates.slice().sort(function(a,b){return parseMDY(a)-parseMDY(b);});
+  var spanDays=sortedDts.length>1?Math.round((parseMDY(sortedDts[sortedDts.length-1])-parseMDY(sortedDts[0]))/86400000):0;
+  var kpis=[
+    chip('Active Locations',locs.length,''),
+    chip('Op Date Range',spanDays>0?spanDays+'d span':'--',spanDays>7?'warn':''),
+    chip('Old-Date Picks (>3d)',fmt(oldPicks),oldPicks>0?'warn':'ok'),
+    chip('% Stale Picks',oldPct+'%',oldPct>=20?'warn':oldPct>0?'':'ok'),
+    chip('Locs w/ Stale Ops',staleLocs.length,staleLocs.length>0?'warn':'ok')
+  ].join('');
+  insightPanel('insight-t3',kpis);
+}
+
+// --- Shared loc-tab builder (used by SYM and In-Facility tabs) ---
+function renderLocTab(tblId, locList) {
+  const resolved = locList.map(s => {
+    if (S.t3[s]) return s;
+    return Object.keys(S.t3).find(k => k.toUpperCase() === s.toUpperCase()) || null;
+  }).filter(Boolean);
+
+  if (!resolved.length) {
+    document.getElementById(tblId).innerHTML =
+      `<tr><td style="padding:24px;color:var(--gray-100);text-align:center">` +
+      `⚠️ No data found for [${locList.join(', ')}] — verify Location IDs in your file.</td></tr>`;
+    return;
+  }
+
+  const colSet = new Set();
+  resolved.forEach(loc => Object.keys(S.t3[loc] || {}).forEach(d => colSet.add(d)));
+  const cols = [...colSet].sort((a, b) => parseMDY(a) - parseMDY(b));
+
+  let html = '<thead><tr><th class="row-hdr">Location / Release Date</th>';
+  cols.forEach(c => {
+    html += `<th${isOld(c) ? ' class="old-hdr"' : ''}>${c}</th>`;
+  });
+  html += '<th>Total</th></tr></thead><tbody>';
+
+  const grandCols = {};
+  let grandSum = 0;
+
+  resolved.forEach(loc => {
+    const locData = S.t3[loc]    || {};
+    const relData = S.t3rel[loc] || {};
+    const key     = loc.replace(/[^A-Za-z0-9]/g, '_');
+
+    // parent summary row
+    let locSum = 0, locCells = '';
+    cols.forEach(c => {
+      const v = locData[c] || 0;
+      locSum += v;
+      grandCols[c] = (grandCols[c] || 0) + v;
+      locCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+    });
+    grandSum += locSum;
+    html += `<tr class="row-loc" onclick="locToggle('${tblId}','${key}')">`;
+    html += `<td class="row-hdr"><span class="sym-arrow" id="arr-${key}">▶</span>${loc}</td>`;
+    html += `${locCells}<td><strong>${fmt(locSum)}</strong></td></tr>`;
+
+    // release-date sub-rows
+    Object.keys(relData).sort((a, b) => parseMDY(a) - parseMDY(b)).forEach(rel => {
+      const rd = relData[rel];
+      let relSum = 0, relCells = '';
+      cols.forEach(c => {
+        const v = rd[c] || 0;
+        relSum += v;
+        relCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+      });
+      html += `<tr class="row-sub" data-loc="${key}" data-tbl="${tblId}" style="display:none">`;
+      html += `<td class="row-hdr">↳ ${rel}</td>${relCells}<td><strong>${fmt(relSum)}</strong></td></tr>`;
+    });
+  });
+
+  html += '<tr class="row-total"><td class="row-hdr">TOTAL</td>';
+  cols.forEach(c => { html += `<td>${fmt(grandCols[c] || 0)}</td>`; });
+  html += `<td>${fmt(grandSum)}</td></tr></tbody>`;
+
+  document.getElementById(tblId).innerHTML = html;
+}
+
+function locToggle(tblId, key) {
+  // Prefer a table-scoped ID (arr-{tblId}-{key}) to avoid collisions across tables.
+  const arr  = document.getElementById('arr-' + tblId + '-' + key)
+             || document.getElementById('arr-' + key);
+  const subs = document.querySelectorAll(`#${tblId} tr.row-sub[data-loc="${key}"]`);
+  if (!arr) return;
+  const open = arr.textContent === '\u25bc';
+  arr.textContent = open ? '\u25b6' : '\u25bc';
+  subs.forEach(r => { r.style.display = open ? 'none' : ''; });
+}
+
+const renderSym   = () => { renderLocTab('t-sym', ['SYM_PAC', 'SYM_VERIFIED']); renderSymItem(); renderSymRepack(); buildSymInstructions(); };
+const renderInFac = () => { renderLocTab('t-inf', ['IN-FACILITY']); renderInFacTrailer(); };
+
+// Render Inbound Trailer ID × Last Op Date table for IN-FACILITY picks
+function renderInFacTrailer() {
+  const tblId = 't-inf-trailer';
+  const psKey = 'tinfTrailer';
+  const ps    = PS[psKey];
+  let trailers = Object.keys(S.infTrailer).sort();
+  if (!trailers.length) {
+    document.getElementById(tblId).innerHTML =
+      `<tr><td style="padding:24px;color:var(--gray-100);text-align:center">` +
+      `⚠️ No IN-FACILITY Trailer IDs found — verify Inbound Trailer ID column in your file.</td></tr>`;
+    return;
+  }
+
+  const colSet = new Set();
+  trailers.forEach(t => Object.keys(S.infTrailer[t] || {}).forEach(d => colSet.add(d)));
+  const cols = [...colSet].sort((a, b) => parseMDY(a) - parseMDY(b));
+
+  const rowTotal = t => cols.reduce((s, c) => s + (S.infTrailer[t][c] || 0), 0);
+  if      (ps.col === '__total__')   trailers.sort((a, b) => ps.dir * (rowTotal(b) - rowTotal(a)));
+  else if (ps.col === '__trailer__') trailers.sort((a, b) => ps.dir * a.localeCompare(b));
+  else if (ps.col)                   trailers.sort((a, b) => ps.dir * ((S.infTrailer[b][ps.col] || 0) - (S.infTrailer[a][ps.col] || 0)));
+
+  const ind = c => ps.col === c ? (ps.dir < 0 ? ' &#9660;' : ' &#9650;') : '';
+  let html = `<thead><tr><th class="row-hdr" onclick="pSort('${psKey}','__trailer__')" style="cursor:pointer">Trailer ID${ind('__trailer__')}</th>`;
+
+  cols.forEach(c => {
+    html += `<th${isOld(c) ? ' class="old-hdr"' : ''} onclick="pSort('${psKey}','${c}')" style="cursor:pointer">${c}${ind(c)}</th>`;
+  });
+  html += `<th onclick="pSort('${psKey}','__total__')" style="cursor:pointer">Total${ind('__total__')}</th></tr></thead><tbody>`;
+
+  const grandCols = {};
+  let grandSum = 0;
+
+  trailers.forEach(trailer => {
+    const trailerData = S.infTrailer[trailer]    || {};
+    const relData     = S.infTrailerRel[trailer] || {};
+    const key         = 'it_' + trailer.replace(/[^A-Za-z0-9]/g, '_');
+
+    let trailerSum = 0, trailerCells = '';
+    cols.forEach(c => {
+      const v = trailerData[c] || 0;
+      trailerSum += v;
+      grandCols[c] = (grandCols[c] || 0) + v;
+      trailerCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+    });
+    grandSum += trailerSum;
+
+    html += `<tr class="row-loc" onclick="locToggle('${tblId}','${key}')">`;
+    html += `<td class="row-hdr"><span class="sym-arrow" id="arr-${tblId}-${key}">▶</span>${trailer}</td>`;
+    html += `${trailerCells}<td><strong>${fmt(trailerSum)}</strong></td></tr>`;
+
+    // Release-date sub-rows
+    Object.keys(relData).sort((a, b) => parseMDY(a) - parseMDY(b)).forEach(rel => {
+      const rd = relData[rel];
+      let relSum = 0, relCells = '';
+      cols.forEach(c => {
+        const v = rd[c] || 0;
+        relSum += v;
+        relCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+      });
+      html += `<tr class="row-sub" data-loc="${key}" data-tbl="${tblId}" style="display:none">`;
+      html += `<td class="row-hdr">↳ ${rel}</td>${relCells}<td><strong>${fmt(relSum)}</strong></td></tr>`;
+    });
+  });
+
+  html += '<tr class="row-total"><td class="row-hdr">TOTAL</td>';
+  cols.forEach(c => { html += `<td>${fmt(grandCols[c] || 0)}</td>`; });
+  html += `<td>${fmt(grandSum)}</td></tr></tbody>`;
+
+  document.getElementById(tblId).innerHTML = html;
+}
+
+// Render Item Number × Last Op Date table for SYM_PAC / SYM_VERIFIED (no Repack Container ID)
+function renderSymItem() {
+  const tblId = 't-sym-item';
+  const psKey = 'tsymItem';
+  const ps    = PS[psKey];
+  let items = Object.keys(S.symItem).sort();
+  if (!items.length) {
+    document.getElementById(tblId).innerHTML =
+      `<tr><td style="padding:24px;color:var(--gray-100);text-align:center">` +
+      `⚠️ No SYM_PAC / SYM_VERIFIED items without a Repack Container ID found.</td></tr>`;
+    return;
+  }
+
+  const colSet = new Set();
+  items.forEach(item => Object.keys(S.symItem[item] || {}).forEach(d => colSet.add(d)));
+  const cols = [...colSet].sort((a, b) => parseMDY(a) - parseMDY(b));
+
+  // Apply column sort to parent rows (sub-rows always stay date-sorted)
+  const rowTotal = item => cols.reduce((s, c) => s + (S.symItem[item][c] || 0), 0);
+  if (ps.col === '__total__')  items.sort((a, b) => ps.dir * (rowTotal(b) - rowTotal(a)));
+  else if (ps.col)             items.sort((a, b) => ps.dir * ((S.symItem[b][ps.col] || 0) - (S.symItem[a][ps.col] || 0)));
+
+  const ind = c => ps.col === c ? (ps.dir < 0 ? ' &#9660;' : ' &#9650;') : '';
+  let html = '<thead><tr><th class="row-hdr">Item Number</th>';
+  cols.forEach(c => {
+    html += `<th${isOld(c) ? ' class="old-hdr"' : ''} onclick="pSort('${psKey}','${c}')" style="cursor:pointer">${c}${ind(c)}</th>`;
+  });
+  html += `<th onclick="pSort('${psKey}','__total__')" style="cursor:pointer">Total${ind('__total__')}</th></tr></thead><tbody>`;
+
+  const grandCols = {};
+  let grandSum = 0;
+
+  items.forEach(item => {
+    const itemData = S.symItem[item]    || {};
+    const relData  = S.symItemRel[item] || {};
+    const key      = 'si_' + item.replace(/[^A-Za-z0-9]/g, '_');
+
+    let itemSum = 0, itemCells = '';
+    cols.forEach(c => {
+      const v = itemData[c] || 0;
+      itemSum += v;
+      grandCols[c] = (grandCols[c] || 0) + v;
+      itemCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+    });
+    grandSum += itemSum;
+
+    html += `<tr class="row-loc" onclick="locToggle('${tblId}','${key}')">`;
+    html += `<td class="row-hdr"><span class="sym-arrow" id="arr-${tblId}-${key}">▶</span>${item}</td>`;
+    html += `${itemCells}<td><strong>${fmt(itemSum)}</strong></td></tr>`;
+
+    // Release-date sub-rows
+    Object.keys(relData).sort((a, b) => parseMDY(a) - parseMDY(b)).forEach(rel => {
+      const rd = relData[rel];
+      let relSum = 0, relCells = '';
+      cols.forEach(c => {
+        const v = rd[c] || 0;
+        relSum += v;
+        relCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+      });
+      html += `<tr class="row-sub" data-loc="${key}" data-tbl="${tblId}" style="display:none">`;
+      html += `<td class="row-hdr">↳ ${rel}</td>${relCells}<td><strong>${fmt(relSum)}</strong></td></tr>`;
+    });
+  });
+
+  html += '<tr class="row-total"><td class="row-hdr">TOTAL</td>';
+  cols.forEach(c => { html += `<td>${fmt(grandCols[c] || 0)}</td>`; });
+  html += `<td>${fmt(grandSum)}</td></tr></tbody>`;
+
+  document.getElementById(tblId).innerHTML = html;
+}
+
+// Render Repack Container ID × Last Op Date table for SYM_PAC / SYM_VERIFIED
+function renderSymRepack() {
+  const tblId = 't-sym-repack';
+  const psKey = 'tsymRepack';
+  const ps    = PS[psKey];
+  let repacks = Object.keys(S.symRepack).sort();
+  if (!repacks.length) {
+    document.getElementById(tblId).innerHTML =
+      `<tr><td style="padding:24px;color:var(--gray-100);text-align:center">` +
+      `⚠️ No SYM_PAC / SYM_VERIFIED Repack Container IDs with Last Op ≥ 3 days old found.</td></tr>`;
+    return;
+  }
+
+  const colSet = new Set();
+  repacks.forEach(r => Object.keys(S.symRepack[r] || {}).forEach(d => colSet.add(d)));
+  const cols = [...colSet].sort((a, b) => parseMDY(a) - parseMDY(b));
+
+  // Apply column sort to parent rows (sub-rows always stay date-sorted)
+  const rowTotal = r => cols.reduce((s, c) => s + (S.symRepack[r][c] || 0), 0);
+  if (ps.col === '__total__')  repacks.sort((a, b) => ps.dir * (rowTotal(b) - rowTotal(a)));
+  else if (ps.col)             repacks.sort((a, b) => ps.dir * ((S.symRepack[b][ps.col] || 0) - (S.symRepack[a][ps.col] || 0)));
+
+  const ind = c => ps.col === c ? (ps.dir < 0 ? ' &#9660;' : ' &#9650;') : '';
+  let html = '<thead><tr><th class="row-hdr">Repack Container ID</th>';
+  cols.forEach(c => {
+    html += `<th${isOld(c) ? ' class="old-hdr"' : ''} onclick="pSort('${psKey}','${c}')" style="cursor:pointer">${c}${ind(c)}</th>`;
+  });
+  html += `<th onclick="pSort('${psKey}','__total__')" style="cursor:pointer">Total${ind('__total__')}</th></tr></thead><tbody>`;
+
+  const grandCols = {};
+  let grandSum = 0;
+
+  repacks.forEach(repack => {
+    const repackData = S.symRepack[repack]    || {};
+    const relData    = S.symRepackRel[repack] || {};
+    const key        = 'sr_' + repack.replace(/[^A-Za-z0-9]/g, '_');
+
+    let repackSum = 0, repackCells = '';
+    cols.forEach(c => {
+      const v = repackData[c] || 0;
+      repackSum += v;
+      grandCols[c] = (grandCols[c] || 0) + v;
+      repackCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+    });
+    grandSum += repackSum;
+
+    html += `<tr class="row-loc" onclick="locToggle('${tblId}','${key}')">`;
+    html += `<td class="row-hdr"><span class="sym-arrow" id="arr-${tblId}-${key}">▶</span>${repack}</td>`;
+    html += `${repackCells}<td><strong>${fmt(repackSum)}</strong></td></tr>`;
+
+    // Release-date sub-rows
+    Object.keys(relData).sort((a, b) => parseMDY(a) - parseMDY(b)).forEach(rel => {
+      const rd = relData[rel];
+      let relSum = 0, relCells = '';
+      cols.forEach(c => {
+        const v = rd[c] || 0;
+        relSum += v;
+        relCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+      });
+      html += `<tr class="row-sub" data-loc="${key}" data-tbl="${tblId}" style="display:none">`;
+      html += `<td class="row-hdr">↳ ${rel}</td>${relCells}<td><strong>${fmt(relSum)}</strong></td></tr>`;
+    });
+  });
+
+  html += '<tr class="row-total"><td class="row-hdr">TOTAL</td>';
+  cols.forEach(c => { html += `<td>${fmt(grandCols[c] || 0)}</td>`; });
+  html += `<td>${fmt(grandSum)}</td></tr></tbody>`;
+
+  document.getElementById(tblId).innerHTML = html;
+}
+
+function buildSymInstructions() {
+  var el = document.getElementById('sym-instructions');
+  if (!el) return;
+  var SYM_LOCS = ['SYM_PAC', 'SYM_VERIFIED'];
+  // Resolve actual keys in S.t3 (case-insensitive)
+  var resolved = SYM_LOCS.map(function(s) {
+    return Object.keys(S.t3).find(function(k) { return k.toUpperCase() === s.toUpperCase(); }) || null;
+  }).filter(Boolean);
+
+  if (!resolved.length) { el.innerHTML = ''; return; }
+
+  // Tally stale picks (>3 calendar days) per location and overall
+  var staleByLoc = {};
+  var totalStale = 0;
+  var totalAll   = 0;
+  resolved.forEach(function(loc) {
+    var locData = S.t3[loc] || {};
+    var locStale = 0;
+    Object.entries(locData).forEach(function(e) {
+      var d = e[0], v = e[1];
+      totalAll += v;
+      if (isOld(d)) { locStale += v; totalStale += v; }
+    });
+    staleByLoc[loc] = locStale;
+  });
+
+  var stalePct = totalAll ? Math.round((totalStale / totalAll) * 100) : 0;
+
+  // Location breakdown chips (red badges inside the badge block)
+  var breakdownHtml = resolved.map(function(loc) {
+    var n = staleByLoc[loc] || 0;
+    return n > 0
+      ? '<span class="sym-stale-loc">' + loc + ': ' + n.toLocaleString() + '</span>'
+      : '';
+  }).join('');
+
+  // Only render the badge block if there are stale picks
+  var badgeHtml = totalStale > 0
+    ? '<div class="sym-stale-badge">' +
+        '<span class="sb-num">' + totalStale.toLocaleString() + '</span>' +
+        '<span class="sb-lbl">Pick IDs &gt; 3 Days Old</span>' +
+        (breakdownHtml ? '<div class="sym-stale-breakdown">' + breakdownHtml + '</div>' : '') +
+      '</div>'
+    : '<div class="sym-stale-badge" style="background:var(--green-100)">' +
+        '<span class="sb-num">0</span>' +
+        '<span class="sb-lbl">No Stale Pick IDs</span>' +
+      '</div>';
+
+  var staleCountLine = totalStale > 0
+    ? '<span style="color:var(--red-100);font-weight:800">' + totalStale.toLocaleString() +
+      ' Pick ID' + (totalStale !== 1 ? 's have' : ' has') + ' had no movement in &gt; 3 calendar days</span>' +
+      ' (' + stalePct + '% of SYM inventory) &mdash; each one requires immediate investigation.'
+    : '<span style="color:var(--green-100);font-weight:700">All SYM Pick IDs have been touched within the last 3 days. No action required.</span>';
+
+  el.innerHTML =
+    '<div class="sym-instr">' +
+      '<div class="sym-instr-header">' +
+        badgeHtml +
+        '<div class="sym-instr-text">' +
+          '<div class="sym-instr-title">' +
+            '&#128680; Cases With No Movement in 3+ Days Must Be Investigated Immediately!' +
+          '</div>' +
+          '<p style="font-size:12px;color:var(--gray-160);margin-bottom:10px;line-height:1.6">' +
+            staleCountLine +
+          '</p>' +
+          '<div class="sym-sop-label">&#128221; Investigation Checklist &mdash; work through in order:</div>' +
+          '<div class="sym-sop-list">' +
+            '<div class="sym-sop-chip"><span class="chip-icon">&#127981;</span> Check Structural Inventory</div>' +
+            '<div class="sym-sop-chip"><span class="chip-icon">&#128270;</span> Identify Suspects</div>' +
+            '<div class="sym-sop-chip"><span class="chip-icon">&#128196;</span> Review IORs</div>' +
+            '<div class="sym-sop-chip"><span class="chip-icon">&#9999;&#65039;</span> Check Manual Removals (MRs)</div>' +
+          '</div>' +
+          '<div class="sym-outs">' +
+            '<span class="outs-icon">&#128226;</span>' +
+            '<span>If <strong>no inventory is found</strong> after completing the checklist above &mdash; ' +
+            'submit an <strong>OUTS</strong> to the <strong>DP / Systems team</strong> to process and clear the Pick ID.</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+}
+
+function pSort(id,col){const ps=PS[id];ps.dir=ps.col===col?-ps.dir:-1;ps.col=col;if(id==='t2')renderT2();else if(id==='tsym')renderSym();else if(id==='tsymItem')renderSymItem();else if(id==='tsymRepack')renderSymRepack();else if(id==='tinfTrailer')renderInFacTrailer();else if(id==='trwUser')renderRWUser();else renderT3();}
+function rwSort(col){RW.sortDir=RW.sortCol===col?-RW.sortDir:1;RW.sortCol=col;RW.page=0;renderRW();}
+
+// ── Label Types reference data ────────────────────────────────────────────
+const LABEL_TYPES = [
+  ['BSHO','Breakpack Shoe (Special)'],
+  ['DANC','Staple stock to Voice Put'],
+  ['DOC1','Breakpack picking documents'],
+  ['DPAL','Caselot DPAL'],
+  ['DQRA','R8002 - DSDC Innerpicks'],
+  ['DQRB','P1001 - DA Breakpack to PUT Innerpicks'],
+  ['DQRL','R8000 - RDS DA Full Case'],
+  ['DSDC','R8002 - Sortation Label'],
+  ['ERRO','Billing records with no matching label'],
+  ['FBFC','R8887 - DA Breakpack Full Case'],
+  ['FCPK','R8000 - RDS DA Full Case \u2013 In house'],
+  ['FCPO','R8100 - RDS DA Full Case - Temp Site'],
+  ['FDNC','R8003 - DA Non-Con to Voice Pick'],
+  ['FDSC','R8002 - DSDC Freight'],
+  ['FNCN','R8001 - DA Full Case Non-Con \u2013 In house'],
+  ['FNCO','R8101 - DA Full Case Non-Con - Temp Site'],
+  ['FPRT','R8004 - Print/Apply'],
+  ['FPUT','R8886 - DA Breakpack to PUT'],
+  ['FVPT','R8888 - DA Non-Con to Voice Put'],
+  ['IN16','P1001 - Induct Cartons'],
+  ['LBDI','Distribution Conveyable Full Case'],
+  ['LBDL','Distribution Breakpack Offline'],
+  ['LBNM','Staple Stock Non-Conveyable Full Case'],
+  ['LBNV','Distribution Non-Conveyable Full Case'],
+  ['LBPL','Staple Stock Breakpack Offline'],
+  ['LBPP','DA Preprint (R8500 - Preprint labels)'],
+  ['LBSC','Security Cage Breakpack'],
+  ['LBSS','Staple Stock Conveyable Full Case'],
+  ['LWPM','WPM Full Case labels'],
+  ['PICK','PTL Sortation Label'],
+  ['PLSS','Staple Stock Full Pallet Pull'],
+  ['PLST','Stock to Stock transfer from the DGXF screen'],
+  ['PTL1','Staple Stock Pick-to-Light (Only if PTL system is down)'],
+  ['PTL2','Breakpack Shoe Sorter'],
+  ['PTL3','(Fineline/Jewelry Distribution) and Distribution Breakpack'],
+  ['PTL4','Jewelry Pick-to-Light 3rd level (Fine Jewelry)'],
+  ['PTL5','Breakpack SAM\u2019s Jewelry'],
+  ['PTL6','Breakpack Keepsake Jewelry'],
+  ['PTLX','Crossdock BRPK Sortation Label'],
+  ['PUT2','Staple Stock to PUT (Special - Canada)'],
+  ['PUTL','PUT - Sortation Label'],
+  ['PUTS','Staple Stock to PUT'],
+  ['PUTX','Shoe Breakpack to PUT (Special - Canada)'],
+  ['SHOE','Shoe (special WPM type)'],
+  ['SHOV','Shoe Distribution Break Pack (DBP) Full Case'],
+  ['SHU2','Shoe Offline'],
+  ['SPT1','Supply Demand - Full Case Sortation'],
+  ['SPT3','Supply Demand - Full Case Induct'],
+  ['SPT4','Supply Demand - Partial Induct'],
+  ['VCLP','Vocollect Sortation Label'],
+  ['VOCL','Voice Non-Con - Voice Pick (Only if Voice Pick system is down)'],
+  ['VPSS','Staple Stock Full Case of Breakpack'],
+  ['WPMV','WPM DBP Full Case'],
+  ['XFER','Billing records with Whse to Whse transfers'],
+];
+
+// ── Label Types card engine ────────────────────────────────────────────────────
+const LBL_PREFIX_COLOR = {B:'lbc-B',D:'lbc-D',E:'lbc-E',F:'lbc-F',I:'lbc-I',L:'lbc-L',P:'lbc-P',S:'lbc-S',V:'lbc-V',W:'lbc-W',X:'lbc-X'};
+
+function lblBadgeClass(code) {
+  return LBL_PREFIX_COLOR[code[0]] || 'lbc-default';
+}
+
+// Extract system reference numbers like R8002, P1001 from description
+function lblExtractRef(desc) {
+  const m = desc.match(/\b([RP]\d{3,4})\b/);
+  return m ? m[1] : null;
+}
+
+// Strip the system ref from the start of description for clean display
+function lblCleanDesc(desc) {
+  return desc.replace(/^[RP]\d{3,4}\s*[-–]\s*/, '').trim();
+}
+
+function hl(text, q) {
+  if (!q) return text;
+  const idx = text.toLowerCase().indexOf(q.toLowerCase());
+  if (idx === -1) return text;
+  return text.slice(0, idx)
+    + `<mark class="lbl-match">${text.slice(idx, idx + q.length)}</mark>`
+    + text.slice(idx + q.length);
+}
+
+function filterLbls(q) {
+  const clearBtn = document.getElementById('lbl-search-clear');
+  if (clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+  const ql = q.toLowerCase();
+  const rows = q
+    ? LABEL_TYPES.filter(([c, d]) => c.toLowerCase().includes(ql) || d.toLowerCase().includes(ql))
+    : LABEL_TYPES;
+
+  const countEl = document.getElementById('lbl-count-n');
+  const chipEl  = document.getElementById('lbl-count-chip');
+  if (countEl) countEl.textContent = rows.length;
+  if (chipEl)  chipEl.className = 'lbl-stat-chip' + (q && rows.length === 0 ? ' neutral' : '');
+
+  const grid = document.getElementById('lbl-grid');
+  if (!grid) return;
+
+  if (!rows.length) {
+    grid.innerHTML = '<div class="lbl-no-results">&#128269; No codes match <strong>\"' + q + '\"</strong></div>';
+    return;
+  }
+
+  grid.innerHTML = rows.map(([code, desc], i) => {
+    const ref      = lblExtractRef(desc);
+    const cleanD   = lblCleanDesc(desc);
+    const badgeCls = lblBadgeClass(code);
+    const hlCode   = hl(code, q);
+    const hlDesc   = hl(cleanD, q);
+    const refBadge = ref ? `<span class="lbl-card-ref">${hl(ref, q)}</span>` : '';
+    const idxLabel = `<span class="lbl-card-idx">#${String(i + 1).padStart(2, '0')}</span>`;
+    return `<div class="lbl-card">`
+      + `<div class="lbl-badge ${badgeCls}">${hlCode}</div>`
+      + `<div class="lbl-card-body">`
+      +   `<div class="lbl-card-desc">${hlDesc}</div>`
+      +   `<div class="lbl-card-meta">${refBadge}${idxLabel}</div>`
+      + `</div>`
+      + `</div>`;
+  }).join('');
+}
+
+function clearLblSearch() {
+  const inp = document.getElementById('lbl-search');
+  if (inp) { inp.value = ''; inp.focus(); }
+  filterLbls('');
+}
+
+function renderLbls() {
+  const total = document.getElementById('lbl-total-count');
+  if (total) total.textContent = LABEL_TYPES.length + ' codes';
+  filterLbls(document.getElementById('lbl-search')?.value || '');
+}
+
+// ── Breakpack (PUT_LIGHT) render ─────────────────────────────────────────
+function renderBP() {
+  const q = (document.getElementById('bp-q')?.value || '').toLowerCase();
+  const allLocs = Object.keys(S.bp);
+  const locs = allLocs
+    .filter(l => !q || l.toLowerCase().includes(q))
+    .sort((a, b) => S.bp[b] - S.bp[a]);      // sort by count desc
+
+  const grandTotal = allLocs.reduce((s, l) => s + S.bp[l], 0);
+  const topLoc     = allLocs.length ? allLocs.slice().sort((a, b) => S.bp[b] - S.bp[a])[0] : null;
+  const topPct     = topLoc && grandTotal ? Math.round((S.bp[topLoc] / grandTotal) * 100) : 0;
+
+  // KPI insight strip
+  const kpis = [
+    chip('Total PUT_LIGHT Picks', fmt(grandTotal), ''),
+    chip('Locations', allLocs.length, ''),
+    chip('Top Location', topLoc ? `${topLoc} (${topPct}%)` : '--', topPct >= 50 ? 'warn' : ''),
+    chip('Showing', locs.length === allLocs.length ? 'All' : `${locs.length} / ${allLocs.length}`, '')
+  ].join('');
+  insightPanel('insight-bp', kpis);
+
+  const countEl = document.getElementById('bp-count');
+  if (countEl) countEl.textContent = `${allLocs.length.toLocaleString()} locations · ${grandTotal.toLocaleString()} picks`;
+
+  if (!locs.length) {
+    document.getElementById('t-bp').innerHTML =
+      '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--gray-100)">' +
+      (allLocs.length ? '🔍 No locations match your filter.' : '⚠️ No PUT_LIGHT data found — verify the Fulfillment System column.') +
+      '</td></tr>';
+    return;
+  }
+
+  let rank = 0;
+  let html = '<thead><tr>'
+    + '<th class="row-hdr">#</th>'
+    + '<th class="row-hdr" style="text-align:left">Location ID / Release Date</th>'
+    + '<th>Pick ID Count</th>'
+    + '<th>% of Total</th>'
+    + '</tr></thead><tbody>';
+
+  locs.forEach(loc => {
+    rank++;
+    const key     = loc.replace(/[^A-Za-z0-9]/g, '_');
+    const cnt     = S.bp[loc];
+    const pct     = grandTotal ? (cnt / grandTotal * 100).toFixed(1) + '%' : '0.0%';
+    const relData = S.bpRel[loc] || {};
+
+    // Parent location row (clickable, expandable)
+    html += `<tr class="row-loc" onclick="locToggle('t-bp','${key}')">`
+      + `<td style="font-weight:800">${rank}</td>`
+      + `<td class="row-hdr"><span class="sym-arrow" id="arr-t-bp-${key}">▶</span>${loc}</td>`
+      + `<td><strong>${fmt(cnt)}</strong></td>`
+      + `<td>${pct}</td></tr>`;
+
+    // Release date sub-rows, sorted chronologically
+    Object.keys(relData)
+      .sort((a, b) => parseMDY(a) - parseMDY(b))
+      .forEach(rel => {
+        const relCnt = relData[rel];
+        const relPct = cnt ? (relCnt / cnt * 100).toFixed(1) + '%' : '0.0%';
+        html += `<tr class="row-sub" data-loc="${key}" data-tbl="t-bp" style="display:none">`
+          + `<td></td>`
+          + `<td class="row-hdr">↳ ${rel}</td>`
+          + `<td>${fmt(relCnt)}</td>`
+          + `<td style="color:var(--gray-100)">${relPct}</td></tr>`;
+      });
+  });
+
+  html += `<tr class="row-total"><td></td><td class="row-hdr">TOTAL</td><td>${fmt(grandTotal)}</td><td>100%</td></tr></tbody>`;
+  document.getElementById('t-bp').innerHTML = html;
+}
+
+function exportBP() {
+  const locs = Object.keys(S.bp).sort((a, b) => S.bp[b] - S.bp[a]);
+  const grandTotal = locs.reduce((s, l) => s + S.bp[l], 0);
+  const rows = [['Rank', 'Location ID', 'Release Date', 'Pick ID Count', '% of Loc Total', '% of Grand Total']];
+  locs.forEach((l, i) => {
+    const locTotal = S.bp[l];
+    const grandPct = grandTotal ? (locTotal / grandTotal * 100).toFixed(1) + '%' : '0.0%';
+    rows.push([i + 1, l, '(All Dates)', locTotal, '100%', grandPct]);
+    const relData = S.bpRel[l] || {};
+    Object.keys(relData)
+      .sort((a, b) => parseMDY(a) - parseMDY(b))
+      .forEach(rel => {
+        const relCnt = relData[rel];
+        const relLocPct = locTotal ? (relCnt / locTotal * 100).toFixed(1) + '%' : '0.0%';
+        rows.push(['', '', rel, relCnt, relLocPct, '']);
+      });
+  });
+  rows.push(['', 'TOTAL', '', grandTotal, '', '100%']);
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `Breakpack_PUTLIGHT_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+// ── Breakpack Detail — Oldest Freight Tracker ────────────────────────────────
+function renderBPDetail() {
+  // Build flat rows from deduplicated detail map
+  let all = Object.entries(S.bpDetail).map(([pid, d]) => [pid, d.relDate, d.locId, d.opTs, d.opUserId || '']);
+
+  // KPI strip (always computed from full unfiltered set)
+  const stale    = all.filter(r => r[1] && isRelOld(r[1]));
+  const withDate = all.filter(r => r[1]).sort((a, b) => parseMDY(a[1]) - parseMDY(b[1]));
+  const oldestDate = withDate.length ? withDate[0][1] : '--';
+  const oldestDays = oldestDate !== '--' ? daysAgo(oldestDate) : 0;
+  const kpis = [
+    chip('PUT_LIGHT Pick IDs', fmt(all.length), ''),
+    chip('Stale Releases (>10d)', fmt(stale.length), stale.length > 0 ? 'warn' : 'ok'),
+    chip('Oldest Release Date', oldestDate, oldestDays > 10 ? 'warn' : ''),
+    chip('Days Old', oldestDays > 0 ? oldestDays + 'd' : '--', oldestDays > 10 ? 'warn' : '')
+  ].join('');
+  insightPanel('insight-bp2', kpis);
+
+  const countEl = document.getElementById('bp2-count');
+  if (countEl) countEl.textContent = `${all.length.toLocaleString()} pick IDs`;
+
+  // Filter
+  let rows = BD.q ? all.filter(r => r.some(c => String(c || '').toLowerCase().includes(BD.q))) : all;
+
+  // Sort: oldest release date first, then location, then pick ID
+  rows = rows.slice().sort((a, b) => {
+    const da = parseMDY(a[1]), db = parseMDY(b[1]);
+    if (da !== db) return da - db;
+    return (a[2] || '').localeCompare(b[2] || '');
+  });
+
+  const total = rows.length;
+  const pages = Math.ceil(total / BD.pg) || 1;
+  BD.page = Math.min(BD.page, pages - 1);
+  const start = BD.page * BD.pg;
+  const pg    = rows.slice(start, start + BD.pg);
+
+  let html = '<thead><tr>'
+    + '<th style="width:38px">#</th>'
+    + '<th>Release Date</th>'
+    + '<th>Days Old</th>'
+    + '<th>Pick ID</th>'
+    + '<th>Location ID</th>'
+    + '<th>Last Op UserID</th>'
+    + '<th>Last Op Timestamp</th>'
+    + '</tr></thead><tbody>';
+
+  pg.forEach((r, i) => {
+    const [pid, relDate, locId, opTs, opUserId] = r;
+    const days  = relDate ? daysAgo(relDate) : 0;
+    const stale = relDate && isRelOld(relDate);
+    const daysLabel = days === 1 ? '1 day' : `${days} days`;
+    html += `<tr${stale ? ' class="bp2-old"' : ''}>`
+      + `<td style="color:var(--gray-100);font-size:11px;text-align:center">${start + i + 1}</td>`
+      + `<td style="font-weight:${stale ? 800 : 600};${stale ? 'color:var(--red-100)' : ''}">${relDate || '—'}</td>`
+      + `<td style="text-align:center;font-weight:${stale ? 800 : 400};${stale ? 'color:var(--red-100)' : 'color:var(--gray-100)'}">` +
+        `${relDate ? daysLabel : '—'}</td>`
+      + `<td style="font-family:'Courier New',monospace;font-size:11.5px">${pid}</td>`
+      + `<td style="font-weight:700">${locId}</td>`
+      + `<td style="font-size:11.5px;color:var(--gray-100)">${opUserId || '—'}</td>`
+      + `<td style="font-size:11.5px;color:var(--gray-100)">${opTs || '—'}</td>`
+      + '</tr>';
+  });
+
+  if (!pg.length) {
+    html += '<tr><td colspan="7" style="padding:28px;text-align:center;color:var(--gray-100)">' +
+      (all.length ? '🔍 No records match your search.' : '⚠️ No PUT_LIGHT detail data — re-import your CSV.') +
+      '</td></tr>';
+  }
+  html += '</tbody>';
+  document.getElementById('t-bp2').innerHTML = html;
+
+  // Pager
+  const pBtn = (lbl, dis, fn) =>
+    `<button onclick="${fn}" style="padding:4px 10px;border:1px solid var(--gray-50);border-radius:5px;cursor:pointer;font-size:12px"${dis ? ' disabled' : ''}>${lbl}</button>`;
+  document.getElementById('bp2-pager').innerHTML =
+    pBtn('&lsaquo;', BD.page === 0, 'BD.page--;renderBPDetail()') +
+    `<span style="font-size:12px;color:var(--gray-100)">Page ${BD.page + 1}&nbsp;/&nbsp;${pages}&ensp;&middot;&ensp;${total.toLocaleString()} rows</span>` +
+    pBtn('&rsaquo;', BD.page >= pages - 1, 'BD.page++;renderBPDetail()');
+}
+
+function exportBPDetail() {
+  const rows = Object.entries(S.bpDetail)
+    .map(([pid, d]) => [d.relDate || '', pid, d.locId || '', d.opUserId || '', d.opTs || '',
+                        d.relDate ? daysAgo(d.relDate) : ''])
+    .sort((a, b) => parseMDY(a[0]) - parseMDY(b[0]));
+  const csv = [['Release Date', 'Days Old', 'Pick ID', 'Location ID', 'Last Op UserID', 'Last Op Timestamp']]
+    .concat(rows.map(r => [r[0], r[5], r[1], r[2], r[3], r[4]]))
+    .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+    .join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `Breakpack_OldestFreight_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+// ── Rewrites (Slot ID = REWRITE) ─────────────────────────────────────────
+function renderRW() {
+  let all = Object.entries(S.rwDetail).map(([pid, d]) => [pid, d.relDate, d.locId, d.ltc, d.opTs, d.opUserId || '']);
+  // idx:                                                   0    1         2        3      4       5
+
+  // KPI strip (always computed on full unfiltered set)
+  const stale      = all.filter(r => r[1] && isRelOld(r[1]));
+  const withDate   = all.filter(r => r[1]).sort((a, b) => parseMDY(a[1]) - parseMDY(b[1]));
+  const oldestDate = withDate.length ? withDate[0][1] : '--';
+  const oldestDays = oldestDate !== '--' ? daysAgo(oldestDate) : 0;
+  const kpis = [
+    chip('Rewrite Pick IDs', fmt(all.length), ''),
+    chip('Stale Releases (>10d)', fmt(stale.length), stale.length > 0 ? 'warn' : 'ok'),
+    chip('Oldest Release Date', oldestDate, oldestDays > 10 ? 'warn' : ''),
+    chip('Days Old', oldestDays > 0 ? oldestDays + 'd' : '--', oldestDays > 10 ? 'warn' : '')
+  ].join('');
+  insightPanel('insight-rw', kpis);
+
+  const countEl = document.getElementById('rw-count');
+  if (countEl) countEl.textContent = `${all.length.toLocaleString()} pick IDs`;
+
+  // Filter
+  let rows = RW.q ? all.filter(r => r.some(c => String(c || '').toLowerCase().includes(RW.q))) : all;
+
+  // Sort by active column
+  const sd = RW.sortDir;
+  rows = rows.slice().sort((a, b) => {
+    switch (RW.sortCol) {
+      case 'relDate': return sd * (parseMDY(a[1]) - parseMDY(b[1]));
+      case 'days':    return sd * (parseMDY(b[1]) - parseMDY(a[1])); // more days = older date
+      case 'pid':     return sd * a[0].localeCompare(b[0]);
+      case 'ltc':     return sd * (a[3] || '').localeCompare(b[3] || '');
+      case 'locId':   return sd * (a[2] || '').localeCompare(b[2] || '');
+      case 'userId':  return sd * (a[5] || '').localeCompare(b[5] || '');
+      case 'opTs':    return sd * (a[4] || '').localeCompare(b[4] || '');
+      default:        return sd * (parseMDY(a[1]) - parseMDY(b[1]));
+    }
+  });
+
+  const total = rows.length;
+  const pages = Math.ceil(total / RW.pg) || 1;
+  RW.page = Math.min(RW.page, pages - 1);
+  const start = RW.page * RW.pg;
+  const pg    = rows.slice(start, start + RW.pg);
+
+  // Sort indicator helper
+  const ind = col => RW.sortCol === col ? (RW.sortDir > 0 ? ' &#9650;' : ' &#9660;') : '';
+  const th  = (col, label, style = '') =>
+    `<th onclick="rwSort('${col}')" style="cursor:pointer;${style}">${label}${ind(col)}</th>`;
+
+  let html = '<thead><tr>'
+    + '<th style="width:38px">#</th>'
+    + th('relDate', 'Release Date')
+    + th('days',    'Days Old')
+    + th('pid',     'Pick ID')
+    + th('ltc',     'Label Type')
+    + th('locId',   'Location ID')
+    + th('userId',  'Last Op UserID')
+    + th('opTs',    'Last Op Timestamp')
+    + '</tr></thead><tbody>';
+
+  pg.forEach((r, i) => {
+    const [pid, relDate, locId, ltc, opTs, opUserId] = r;
+    const days  = relDate ? daysAgo(relDate) : 0;
+    const stale = relDate && isRelOld(relDate);
+    const daysLabel = days === 1 ? '1 day' : `${days} days`;
+    html += `<tr${stale ? ' class="rw-old"' : ''}>`
+      + `<td style="color:var(--gray-100);font-size:11px;text-align:center">${start + i + 1}</td>`
+      + `<td style="font-weight:${stale ? 800 : 600};${stale ? 'color:var(--red-100)' : ''}">${relDate || '\u2014'}</td>`
+      + `<td style="text-align:center;font-weight:${stale ? 800 : 400};${stale ? 'color:var(--red-100)' : 'color:var(--gray-100)'}">${relDate ? daysLabel : '\u2014'}</td>`
+      + `<td style="font-family:'Courier New',monospace;font-size:11.5px">${pid}</td>`
+      + `<td style="font-weight:600;color:#4527a0">${ltc || '\u2014'}</td>`
+      + `<td style="font-weight:700">${locId || '\u2014'}</td>`
+      + `<td style="font-size:11.5px;color:var(--gray-100)">${opUserId || '\u2014'}</td>`
+      + `<td style="font-size:11.5px;color:var(--gray-100)">${opTs || '\u2014'}</td>`
+      + '</tr>';
+  });
+
+  if (!pg.length) {
+    html += '<tr><td colspan="8" style="padding:28px;text-align:center;color:var(--gray-100)">' +
+      (all.length ? '\uD83D\uDD0D No records match your search.' : '\u26A0\uFE0F No Slot ID = REWRITE records found \u2014 re-import your CSV.') +
+      '</td></tr>';
+  }
+  html += '</tbody>';
+  document.getElementById('t-rw').innerHTML = html;
+
+  const pBtn = (lbl, dis, fn) =>
+    `<button onclick="${fn}" style="padding:4px 10px;border:1px solid var(--gray-50);border-radius:5px;cursor:pointer;font-size:12px"${dis ? ' disabled' : ''}>${lbl}</button>`;
+  document.getElementById('rw-pager').innerHTML =
+    pBtn('&lsaquo;', RW.page === 0, 'RW.page--;renderRW()') +
+    `<span style="font-size:12px;color:var(--gray-100)">Page ${RW.page + 1}&nbsp;/&nbsp;${pages}&ensp;&middot;&ensp;${total.toLocaleString()} rows</span>` +
+    pBtn('&rsaquo;', RW.page >= pages - 1, 'RW.page++;renderRW()');
+}
+
+function exportRW() {
+  const rows = Object.entries(S.rwDetail)
+    .map(([pid, d]) => [d.relDate || '', pid, d.ltc || '', d.locId || '', d.opUserId || '', d.opTs || '',
+                        d.relDate ? daysAgo(d.relDate) : ''])
+    .sort((a, b) => parseMDY(a[0]) - parseMDY(b[0]));
+  const csv = [['Release Date', 'Days Old', 'Pick ID', 'Label Type', 'Location ID', 'Last Op UserID', 'Last Op Timestamp']]
+    .concat(rows.map(r => [r[0], r[6], r[1], r[2], r[3], r[4], r[5]]))
+    .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+    .join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `Rewrites_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+// ── Rewrites × Last Op UserID pivot ────────────────────────────────
+function renderRWUser() {
+  const tblId = 't-rw-user';
+  const psKey = 'trwUser';
+  const ps    = PS[psKey];
+  let users = Object.keys(S.rwUserPivot).sort();
+
+  if (!users.length) {
+    document.getElementById(tblId).innerHTML =
+      `<tr><td style="padding:24px;color:var(--gray-100);text-align:center">` +
+      `⚠️ No Slot ID = REWRITE records found — re-import your CSV.</td></tr>`;
+    return;
+  }
+
+  const colSet = new Set();
+  users.forEach(u => Object.keys(S.rwUserPivot[u] || {}).forEach(d => colSet.add(d)));
+  const cols = [...colSet].sort((a, b) => parseMDY(a) - parseMDY(b));
+
+  const rowTotal = u => cols.reduce((s, c) => s + (S.rwUserPivot[u][c] || 0), 0);
+  if      (ps.col === '__total__') users.sort((a, b) => ps.dir * (rowTotal(b) - rowTotal(a)));
+  else if (ps.col === '__user__')  users.sort((a, b) => ps.dir * a.localeCompare(b));
+  else if (ps.col)                 users.sort((a, b) => ps.dir * ((S.rwUserPivot[b][ps.col] || 0) - (S.rwUserPivot[a][ps.col] || 0)));
+
+  const ind = c => ps.col === c ? (ps.dir < 0 ? ' &#9660;' : ' &#9650;') : '';
+  let html = `<thead><tr>`
+    + `<th class="row-hdr" onclick="pSort('${psKey}','__user__')" style="cursor:pointer">Last Op UserID${ind('__user__')}</th>`;
+  cols.forEach(c => {
+    html += `<th${isOld(c) ? ' class="old-hdr"' : ''} onclick="pSort('${psKey}','${c}')" style="cursor:pointer">${c}${ind(c)}</th>`;
+  });
+  html += `<th onclick="pSort('${psKey}','__total__')" style="cursor:pointer">Total${ind('__total__')}</th></tr></thead><tbody>`;
+
+  const grandCols = {};
+  let grandSum = 0;
+
+  users.forEach(user => {
+    const userData = S.rwUserPivot[user] || {};
+    const relData  = S.rwUserRel[user]   || {};
+    const key      = 'rwu_' + user.replace(/[^A-Za-z0-9]/g, '_');
+
+    let userSum = 0, userCells = '';
+    cols.forEach(c => {
+      const v = userData[c] || 0;
+      userSum += v;
+      grandCols[c] = (grandCols[c] || 0) + v;
+      userCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+    });
+    grandSum += userSum;
+
+    html += `<tr class="row-loc" onclick="locToggle('${tblId}','${key}')">`;
+    html += `<td class="row-hdr"><span class="sym-arrow" id="arr-${tblId}-${key}">▶</span>${user}</td>`;
+    html += `${userCells}<td><strong>${fmt(userSum)}</strong></td></tr>`;
+
+    // Release-date sub-rows
+    Object.keys(relData).sort((a, b) => parseMDY(a) - parseMDY(b)).forEach(rel => {
+      const rd = relData[rel];
+      let relSum = 0, relCells = '';
+      cols.forEach(c => {
+        const v = rd[c] || 0;
+        relSum += v;
+        relCells += `<td${isOld(c) && v > 0 ? ' class="old-cell"' : ''}>${v > 0 ? fmt(v) : ''}</td>`;
+      });
+      html += `<tr class="row-sub" data-loc="${key}" data-tbl="${tblId}" style="display:none">`;
+      html += `<td class="row-hdr">↳ ${rel}</td>${relCells}<td><strong>${fmt(relSum)}</strong></td></tr>`;
+    });
+  });
+
+  html += '<tr class="row-total"><td class="row-hdr">TOTAL</td>';
+  cols.forEach(c => { html += `<td>${fmt(grandCols[c] || 0)}</td>`; });
+  html += `<td>${fmt(grandSum)}</td></tr></tbody>`;
+
+  document.getElementById(tblId).innerHTML = html;
+}
+
+// ── NonCon (CP_VOICE / VOICE_PICK) ─────────────────────────────────────────────
+function renderNC() {
+  const q       = (document.getElementById('nc-q')?.value || '').toLowerCase();
+  const allLocs = Object.keys(S.nc);
+  const locs    = allLocs.filter(l => !q || l.toLowerCase().includes(q))
+                         .sort((a, b) => S.nc[b] - S.nc[a]);
+  const grandTotal = allLocs.reduce((s, l) => s + S.nc[l], 0);
+  const topLoc     = allLocs.length ? allLocs.slice().sort((a, b) => S.nc[b] - S.nc[a])[0] : null;
+  const topPct     = topLoc && grandTotal ? Math.round((S.nc[topLoc] / grandTotal) * 100) : 0;
+
+  const kpis = [
+    chip('Total CP_VOICE/VOICE_PICK Picks', fmt(grandTotal), ''),
+    chip('Locations', allLocs.length, ''),
+    chip('Top Location', topLoc ? `${topLoc} (${topPct}%)` : '--', topPct >= 50 ? 'warn' : ''),
+    chip('Showing', locs.length === allLocs.length ? 'All' : `${locs.length} / ${allLocs.length}`, '')
+  ].join('');
+  insightPanel('insight-nc', kpis);
+
+  const countEl = document.getElementById('nc-count');
+  if (countEl) countEl.textContent = `${allLocs.length.toLocaleString()} locations · ${grandTotal.toLocaleString()} picks`;
+
+  if (!locs.length) {
+    document.getElementById('t-nc').innerHTML =
+      '<tr><td colspan="4" style="padding:24px;text-align:center;color:var(--gray-100)">' +
+      (allLocs.length ? '🔍 No locations match your filter.'
+                      : '⚠️ No CP_VOICE / VOICE_PICK data found — verify the Fulfillment System column.') +
+      '</td></tr>';
+    return;
+  }
+
+  let rank = 0;
+  let html = '<thead><tr>'
+    + '<th class="row-hdr">#</th>'
+    + '<th class="row-hdr" style="text-align:left">Location ID / Release Date</th>'
+    + '<th>Pick ID Count</th>'
+    + '<th>% of Total</th>'
+    + '</tr></thead><tbody>';
+
+  locs.forEach(loc => {
+    rank++;
+    const key     = loc.replace(/[^A-Za-z0-9]/g, '_');
+    const cnt     = S.nc[loc];
+    const pct     = grandTotal ? (cnt / grandTotal * 100).toFixed(1) + '%' : '0.0%';
+    const relData = S.ncRel[loc] || {};
+
+    html += `<tr class="row-loc" onclick="locToggle('t-nc','${key}')">`
+      + `<td style="font-weight:800">${rank}</td>`
+      + `<td class="row-hdr"><span class="sym-arrow" id="arr-t-nc-${key}">▶</span>${loc}</td>`
+      + `<td><strong>${fmt(cnt)}</strong></td>`
+      + `<td>${pct}</td></tr>`;
+
+    Object.keys(relData)
+      .sort((a, b) => parseMDY(a) - parseMDY(b))
+      .forEach(rel => {
+        const relCnt = relData[rel];
+        const relPct = cnt ? (relCnt / cnt * 100).toFixed(1) + '%' : '0.0%';
+        html += `<tr class="row-sub" data-loc="${key}" data-tbl="t-nc" style="display:none">`
+          + `<td></td>`
+          + `<td class="row-hdr">↳ ${rel}</td>`
+          + `<td>${fmt(relCnt)}</td>`
+          + `<td style="color:var(--gray-100)">${relPct}</td></tr>`;
+      });
+  });
+
+  html += `<tr class="row-total"><td></td><td class="row-hdr">TOTAL</td><td>${fmt(grandTotal)}</td><td>100%</td></tr></tbody>`;
+  document.getElementById('t-nc').innerHTML = html;
+}
+
+function exportNC() {
+  const locs = Object.keys(S.nc).sort((a, b) => S.nc[b] - S.nc[a]);
+  const grandTotal = locs.reduce((s, l) => s + S.nc[l], 0);
+  const rows = [['Rank', 'Location ID', 'Release Date', 'Pick ID Count', '% of Loc Total', '% of Grand Total']];
+  locs.forEach((l, i) => {
+    const locTotal = S.nc[l];
+    const grandPct = grandTotal ? (locTotal / grandTotal * 100).toFixed(1) + '%' : '0.0%';
+    rows.push([i + 1, l, '(All Dates)', locTotal, '100%', grandPct]);
+    const relData = S.ncRel[l] || {};
+    Object.keys(relData)
+      .sort((a, b) => parseMDY(a) - parseMDY(b))
+      .forEach(rel => {
+        const relCnt = relData[rel];
+        const relLocPct = locTotal ? (relCnt / locTotal * 100).toFixed(1) + '%' : '0.0%';
+        rows.push(['', '', rel, relCnt, relLocPct, '']);
+      });
+  });
+  rows.push(['', 'TOTAL', '', grandTotal, '', '100%']);
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `NonCon_CPVOICE_VOICEPICK_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+function renderNCDetail() {
+  let all = Object.entries(S.ncDetail).map(([pid, d]) => [pid, d.relDate, d.locId, d.opTs, d.opUserId || '']);
+
+  const stale      = all.filter(r => r[1] && isRelOld(r[1]));
+  const withDate   = all.filter(r => r[1]).sort((a, b) => parseMDY(a[1]) - parseMDY(b[1]));
+  const oldestDate = withDate.length ? withDate[0][1] : '--';
+  const oldestDays = oldestDate !== '--' ? daysAgo(oldestDate) : 0;
+  const kpis = [
+    chip('NonCon Pick IDs', fmt(all.length), ''),
+    chip('Stale Releases (>10d)', fmt(stale.length), stale.length > 0 ? 'warn' : 'ok'),
+    chip('Oldest Release Date', oldestDate, oldestDays > 10 ? 'warn' : ''),
+    chip('Days Old', oldestDays > 0 ? oldestDays + 'd' : '--', oldestDays > 10 ? 'warn' : '')
+  ].join('');
+  insightPanel('insight-nc2', kpis);
+
+  const countEl = document.getElementById('nc2-count');
+  if (countEl) countEl.textContent = `${all.length.toLocaleString()} pick IDs`;
+
+  let rows = ND.q ? all.filter(r => r.some(c => String(c || '').toLowerCase().includes(ND.q))) : all;
+  rows = rows.slice().sort((a, b) => {
+    const da = parseMDY(a[1]), db = parseMDY(b[1]);
+    if (da !== db) return da - db;
+    return (a[2] || '').localeCompare(b[2] || '');
+  });
+
+  const total = rows.length;
+  const pages = Math.ceil(total / ND.pg) || 1;
+  ND.page = Math.min(ND.page, pages - 1);
+  const start = ND.page * ND.pg;
+  const pg    = rows.slice(start, start + ND.pg);
+
+  let html = '<thead><tr>'
+    + '<th style="width:38px">#</th>'
+    + '<th>Release Date</th>'
+    + '<th>Days Old</th>'
+    + '<th>Pick ID</th>'
+    + '<th>Location ID</th>'
+    + '<th>Last Op UserID</th>'
+    + '<th>Last Op Timestamp</th>'
+    + '</tr></thead><tbody>';
+
+  pg.forEach((r, i) => {
+    const [pid, relDate, locId, opTs, opUserId] = r;
+    const days  = relDate ? daysAgo(relDate) : 0;
+    const isStale = relDate && isRelOld(relDate);
+    const daysLabel = days === 1 ? '1 day' : `${days} days`;
+    html += `<tr${isStale ? ' class="nc2-old"' : ''}>`
+      + `<td style="color:var(--gray-100);font-size:11px;text-align:center">${start + i + 1}</td>`
+      + `<td style="font-weight:${isStale ? 800 : 600};${isStale ? 'color:var(--red-100)' : ''}">${relDate || '—'}</td>`
+      + `<td style="text-align:center;font-weight:${isStale ? 800 : 400};${isStale ? 'color:var(--red-100)' : 'color:var(--gray-100)'}">${relDate ? daysLabel : '—'}</td>`
+      + `<td style="font-family:'Courier New',monospace;font-size:11.5px">${pid}</td>`
+      + `<td style="font-weight:700">${locId}</td>`
+      + `<td style="font-size:11.5px;color:var(--gray-100)">${opUserId || '—'}</td>`
+      + `<td style="font-size:11.5px;color:var(--gray-100)">${opTs || '—'}</td>`
+      + '</tr>';
+  });
+
+  if (!pg.length) {
+    html += '<tr><td colspan="7" style="padding:28px;text-align:center;color:var(--gray-100)">' +
+      (all.length ? '🔍 No records match your search.' : '⚠️ No NonCon detail data — re-import your CSV.') +
+      '</td></tr>';
+  }
+  html += '</tbody>';
+  document.getElementById('t-nc2').innerHTML = html;
+
+  const pBtn = (lbl, dis, fn) =>
+    `<button onclick="${fn}" style="padding:4px 10px;border:1px solid var(--gray-50);border-radius:5px;cursor:pointer;font-size:12px"${dis ? ' disabled' : ''}>${lbl}</button>`;
+  document.getElementById('nc2-pager').innerHTML =
+    pBtn('&lsaquo;', ND.page === 0, 'ND.page--;renderNCDetail()') +
+    `<span style="font-size:12px;color:var(--gray-100)">Page ${ND.page + 1}&nbsp;/&nbsp;${pages}&ensp;&middot;&ensp;${total.toLocaleString()} rows</span>` +
+    pBtn('&rsaquo;', ND.page >= pages - 1, 'ND.page++;renderNCDetail()');
+}
+
+function exportNCDetail() {
+  const rows = Object.entries(S.ncDetail)
+    .map(([pid, d]) => [d.relDate || '', pid, d.locId || '', d.opUserId || '', d.opTs || '',
+                        d.relDate ? daysAgo(d.relDate) : ''])
+    .sort((a, b) => parseMDY(a[0]) - parseMDY(b[0]));
+  const csv = [['Release Date', 'Days Old', 'Pick ID', 'Location ID', 'Last Op UserID', 'Last Op Timestamp']]
+    .concat(rows.map(r => [r[0], r[5], r[1], r[2], r[3], r[4]]))
+    .map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+    .join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `NonCon_OldestFreight_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+}
+
+// ── SV Projection render ─────────────────────────────────────────────────
+function renderSV() {
+  const sv      = S.sv;
+  const tot     = sv.total;   // ALLOC/PICKED + release ≥10 days old
+  const pct     = n => tot ? (n / tot * 100).toFixed(1) + '%' : '0.0%';
+  const todaySV = sv.total - sv.inFacility - sv.symPac - sv.symVerified - sv.touched;
+  const svCost  = sv.totalCost - sv.inFacilityCost - sv.symPacCost - sv.symVerifiedCost - sv.touchedCost;
+  const fmt2    = n => (n >= 0 ? '' : '−') + Math.abs(n).toLocaleString();
+  const fmtCost = n => '$' + Math.abs(n).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  // Detail table rows
+  const ROWS = [
+    { n:'Total Picks',       desc:'CS=ALLOC/PICKED · Release ≥10d',                                     val:tot,           cost:sv.totalCost,        color:'#ea1100', cls:'' },
+    { n:'In-Facility',       desc:'Loc=IN-FACILITY · CS=ALLOC/PICKED · Release ≥10d · Last Op ≥3d',   val:sv.inFacility, cost:sv.inFacilityCost,   color:'#b91c1c', cls:'' },
+    { n:'SYM_PAC',           desc:'Loc=SYM_PAC · CS=ALLOC/PICKED · Release ≥10d · Last Op ≥3d',       val:sv.symPac,     cost:sv.symPacCost,       color:'#c0392b', cls:'' },
+    { n:'SYM_VERIFIED',      desc:'Loc=SYM_VERIFIED · CS=ALLOC/PICKED · Release ≥10d · Last Op ≥3d',  val:sv.symVerified,cost:sv.symVerifiedCost,  color:'#c0392b', cls:'' },
+    { n:'No Recent Movement',desc:'CS=ALLOC/PICKED · Release ≥10d · Last Op ≥3 days ago',          val:sv.noMovement, cost:sv.noMovementCost,   color:'#ea1100', cls:'warn' },
+    { n:'Touched Last 3 Days',desc:'CS=ALLOC/PICKED · Release ≥10d · Last Op <3 days ago',         val:sv.touched,    cost:sv.touchedCost,      color:'#2a8703', cls:'ok' },
+    { n:"Today's SV",        desc:'Total Picks − (InFac + SYM_PAC + SYM_VER)',               val:todaySV,       cost:svCost,              color:'#fff',    cls:'sv-row', isSV:true },
+  ];
+
+  const tbody = document.getElementById('sv-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = ROWS.map((r, i) => {
+    const rowCls   = r.isSV
+      ? 'sv-row-sv'
+      : (i === 0 ? 'sv-row-total sv-row-accent' : 'sv-row-accent');
+    const rowStyle = r.isSV ? '' : ` style="--row-accent:${r.color}"`;
+    const numDisp  = r.isSV ? fmt2(todaySV) : r.val.toLocaleString();
+    const costDisp  = r.isSV ? fmtCost(svCost) : fmtCost(r.cost);
+    const numStyle = r.isSV ? '' : (r.cls === 'warn' ? 'color:var(--red-100)' : r.cls === 'ok' ? 'color:var(--green-100)' : 'color:#7f1d1d');
+    return `<tr class="${rowCls}"${rowStyle}>`
+      + `<td style="color:#bbb;font-weight:600;font-size:10.5px;text-align:center">${String(i+1).padStart(2,'0')}</td>`
+      + `<td><div class="sv-metric-name">${r.n}</div><div class="sv-metric-desc">${r.desc}</div></td>`
+      + `<td class="sv-count" style="${numStyle}">${numDisp}</td>`
+      + `<td class="sv-cost">${costDisp}</td>`
+      + `</tr>`;
+  }).join('');
+}
+
+function exportSV() {
+  const sv      = S.sv;
+  const tot     = sv.total;
+  const todaySV = sv.total - sv.inFacility - sv.symPac - sv.symVerified - sv.touched;
+  const svCost  = sv.totalCost - sv.inFacilityCost - sv.symPacCost - sv.symVerifiedCost - sv.touchedCost;
+  const p  = (n, d) => (d ? (n / d * 100).toFixed(1) + '%' : '0.0%');
+  const fc = n => n.toFixed(2);
+  const rows = [
+    ['Metric', 'Definition', 'Count', '% of Total Picks', 'WHPK Cost ($)'],
+    ['Total Picks',
+     'CS=ALLOCATED or PICKED + Release Date ≥10 days old',
+     tot, tot ? '100.0%' : '0.0%', fc(sv.totalCost)],
+    ['In-Facility',
+     'Location ID=IN-FACILITY + CS=ALLOCATED or PICKED + Release Date ≥10 days old + Last Op ≥3 days old',
+     sv.inFacility, p(sv.inFacility, tot), fc(sv.inFacilityCost)],
+    ['SYM_PAC',
+     'Location ID=SYM_PAC + CS=ALLOCATED or PICKED + Release Date ≥10 days old + Last Op ≥3 days old',
+     sv.symPac, p(sv.symPac, tot), fc(sv.symPacCost)],
+    ['SYM_VERIFIED',
+     'Location ID=SYM_VERIFIED + CS=ALLOCATED or PICKED + Release Date ≥10 days old + Last Op ≥3 days old',
+     sv.symVerified, p(sv.symVerified, tot), fc(sv.symVerifiedCost)],
+    ['No Recent Movement',
+     'CS=ALLOCATED or PICKED + Release Date ≥10 days old + Last Op Timestamp ≥3 days old',
+     sv.noMovement, p(sv.noMovement, tot), fc(sv.noMovementCost)],
+    ['Touched Last 3 Days',
+     'CS=ALLOCATED or PICKED + Release Date ≥10 days old + Last Op Timestamp <3 days old',
+     sv.touched, p(sv.touched, tot), fc(sv.touchedCost)],
+    ["Today's SV",
+     'Total Picks − (In-Facility + SYM_PAC + SYM_VERIFIED + Touched Last 3 Days)',
+     todaySV, '', fc(svCost)],
+  ];
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `SV_Projection_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+function exportLbls() {
+  const csv = ['Code,Description']
+    .concat(LABEL_TYPES.map(([c, d]) => `"${c}","${d.replace(/"/g, '""')}"`)).join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `LabelType_Reference_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// ── Update header timestamps ───────────────────────────────────────────────
+function updateHeaderTimestamps() {
+  const now = new Date();
+  document.getElementById('hdr-now').textContent      = 'Now: ' + fmtTs(now);
+  document.getElementById('foot-ts').textContent      = fmtTs(now);
+  const itEl = document.getElementById('hdr-import-ts');
+  itEl.innerHTML = S.importTs
+    ? `Last Import: <strong>${S.importTs}</strong>`
+    : 'No import yet';
+}
+
+// tab badge always shows full unfiltered total
+function updatePoBadge() {
+  const n = OV.rows.length;
+  const el = document.getElementById('po-badge');
+  if (el) el.textContent = n ? ` (${n.toLocaleString()})` : ' (none)';
+}
+
+function showDashboard() {
+  loaded = true;
+  document.getElementById('tab-nav').classList.add('visible');
+  const onDash = activeTab === 'dash', onSym = activeTab === 'sym',
+        onPo   = activeTab === 'po',   onLbl = activeTab === 'lbl',
+        onInf  = activeTab === 'inf',  onSV  = activeTab === 'sv',
+        onBP   = activeTab === 'bp',   onNC  = activeTab === 'nc',
+        onRW   = activeTab === 'rw';
+  ['sec-t1','sec-t2','sec-t3'].forEach(id => document.getElementById(id).classList.toggle('hidden', !onDash));
+  document.getElementById('sec-po').classList.toggle('hidden',  !onPo);
+  document.getElementById('sec-sym').classList.toggle('hidden', !onSym);
+  document.getElementById('sec-sym2').classList.toggle('hidden', !onSym);
+  document.getElementById('sec-sym3').classList.toggle('hidden', !onSym);
+  document.getElementById('sec-inf').classList.toggle('hidden', !onInf);
+  document.getElementById('sec-inf-trailer').classList.toggle('hidden', !onInf);
+  document.getElementById('sec-lbl').classList.toggle('hidden', !onLbl);
+  document.getElementById('sec-sv').classList.toggle('hidden',  !onSV);
+  document.getElementById('sec-bp').classList.toggle('hidden',  !onBP);
+  document.getElementById('sec-bp2').classList.toggle('hidden', !onBP);
+  document.getElementById('sec-nc').classList.toggle('hidden',  !onNC);
+  document.getElementById('sec-nc2').classList.toggle('hidden', !onNC);
+  document.getElementById('sec-rw').classList.toggle('hidden',      !onRW);
+  document.getElementById('sec-rw-user').classList.toggle('hidden',  !onRW);
+  document.getElementById('drop-zone').classList.add('hidden');
+  document.getElementById('btn-import-new').style.display = 'flex';
+  updateHeaderTimestamps();
+  updatePoBadge();
+  if      (onDash) { renderT1(); renderT2(); renderT3(); }
+  else if (onSym)  renderSym();
+  else if (onInf)  renderInFac();
+  else if (onLbl)  renderLbls();
+  else if (onSV)   renderSV();
+  else if (onBP)   { renderBP(); renderBPDetail(); }
+  else if (onNC)   { renderNC(); renderNCDetail(); }
+  else if (onRW)   { renderRW(); renderRWUser(); }
+  else             renderOverages();
+}
+
+// ── Export ─────────────────────────────────────────────────────────────────
+function exportTable(tblId, name) {
+  const tbl = document.getElementById(tblId); if (!tbl) return;
+  const csv = [...tbl.querySelectorAll('tr')]
+    .filter(r => !r.classList.contains('row-sub'))          // skip hidden sub-rows
+    .map(r => [...r.querySelectorAll('th,td')].map(c => {
+      const clone = c.cloneNode(true);
+      clone.querySelectorAll('.sym-arrow').forEach(el => el.remove()); // strip ▶ arrows
+      return `"${clone.textContent.trim().replace(/"/g,'""')}"`;
+    }).join(','))
+    .join('\r\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = `${name}_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// ── Progress UI ────────────────────────────────────────────────────────────
+function setProgress(pct, label) {
+  document.getElementById('prog-bar').style.width = pct + '%';
+  document.getElementById('prog-pct').textContent = Math.round(pct) + '%';
+  if (label) document.getElementById('prog-text').textContent = label;
+}
+
+// ── CSV streaming ──────────────────────────────────────────────────────────
+function parseCSV(file) {
+  resetState();
+  const pw = document.getElementById('progress-wrap');
+  pw.style.display = 'block'; setProgress(0, 'Streaming CSV…');
+  Papa.parse(file, {
+    header: true, skipEmptyLines: true, chunkSize: 1024*1024*4,
+    chunk(results) {
+      results.data.forEach(processRow);
+      const pct = Math.min(99, (results.meta.cursor / file.size)*100);
+      setProgress(pct, `Parsed ${S.totalPicks.toLocaleString()} rows…`);
+    },
+    complete() {
+      setProgress(100, 'Done!');
+      S.importTs = fmtTs(new Date());
+      saveState();
+      setTimeout(()=>{ pw.style.display='none'; showDashboard(); toast('✅ Import complete!'); }, 400);
+    },
+    error(err) { setProgress(0,'Error: '+err.message); alert('CSV parse error: '+err.message); }
+  });
+}
+
+// ── Excel (SheetJS) ────────────────────────────────────────────────────────
+function parseExcel(file) {
+  resetState();
+  const pw = document.getElementById('progress-wrap');
+  pw.style.display='block'; setProgress(10,'Reading Excel file…');
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      setProgress(40,'Parsing workbook…');
+      const wb = XLSX.read(e.target.result,{type:'array',cellText:true,cellNF:false});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      setProgress(60,'Converting to JSON…');
+      const arr = XLSX.utils.sheet_to_json(ws,{header:1,raw:false});
+      const hdr = arr[0];
+      for (let i=1;i<arr.length;i++) {
+        const row={}; hdr.forEach((h,j)=>{ row[h]=arr[i][j]??''; }); processRow(row);
+        if (i%50000===0) setProgress(70+(i/arr.length)*28,`Processed ${S.totalPicks.toLocaleString()} rows…`);
+      }
+      setProgress(100,'Done!');
+      S.importTs = fmtTs(new Date());
+      saveState();
+      setTimeout(()=>{ pw.style.display='none'; showDashboard(); toast('✅ Import complete!'); }, 400);
+    } catch(ex) { setProgress(0,'Error: '+ex.message); alert('Excel parse error: '+ex.message); }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ── File handling ──────────────────────────────────────────────────────────
+function handleFile(file) {
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext==='csv') parseCSV(file);
+  else if (ext==='xlsx'||ext==='xls') parseExcel(file);
+  else alert('Unsupported file type. Use CSV or Excel (.xlsx / .xls).');
+}
+
+function triggerImport() { document.getElementById('file-input').click(); }
+
+document.getElementById('file-input').addEventListener('change', e => {
+  handleFile(e.target.files[0]);
+  e.target.value = ''; // reset so same file can be re-imported
+});
+
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover', e=>{ e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', ()=>dz.classList.remove('drag'));
+dz.addEventListener('drop', e=>{ e.preventDefault(); dz.classList.remove('drag'); handleFile(e.dataTransfer.files[0]); });
+
+// ── PO Overages ────────────────────────────────────────────────────────────
+const OV_COLS=['Location ID','Release Date','Status','PO Number','Overage(VNPK)','Ordered(VNPK)','Received(VNPK)','PO Line #',
+  'Delivery #','Last Op UserID','Last Op Timestamp','Slot ID','Inbound Trailer','Fulfillment',
+  'Item #','Item Description','Label Type','Induct Label','Pick ID'];
+const OV={rows:[],sortCol:0,sortDir:1,page:0,pg:100,q:''};
+const BD={page:0,pg:100,q:''};
+const ND={page:0,pg:100,q:''};
+const RW={page:0,pg:100,q:'',sortCol:'relDate',sortDir:1};
+let activeTab='dash', loaded=false;
+function switchTab(tab){
+  activeTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  const onDash = tab==='dash', onSym = tab==='sym', onPo = tab==='po',
+        onLbl  = tab==='lbl', onInf = tab==='inf',  onSV = tab==='sv',
+        onBP   = tab==='bp',  onNC  = tab==='nc',
+        onRW   = tab==='rw';
+  ['sec-t1','sec-t2','sec-t3'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', !onDash || !loaded));
+  document.getElementById('sec-po').classList.toggle('hidden',  !onPo);
+  document.getElementById('sec-sym').classList.toggle('hidden', !onSym || !loaded);
+  document.getElementById('sec-sym2').classList.toggle('hidden', !onSym || !loaded);
+  document.getElementById('sec-sym3').classList.toggle('hidden', !onSym || !loaded);
+  document.getElementById('sec-inf').classList.toggle('hidden', !onInf || !loaded);
+  document.getElementById('sec-inf-trailer').classList.toggle('hidden', !onInf || !loaded);
+  document.getElementById('sec-lbl').classList.toggle('hidden', !onLbl);
+  document.getElementById('sec-sv').classList.toggle('hidden',  !onSV  || !loaded);
+  document.getElementById('sec-bp').classList.toggle('hidden',  !onBP  || !loaded);
+  document.getElementById('sec-bp2').classList.toggle('hidden', !onBP  || !loaded);
+  document.getElementById('sec-nc').classList.toggle('hidden',  !onNC  || !loaded);
+  document.getElementById('sec-nc2').classList.toggle('hidden', !onNC  || !loaded);
+  document.getElementById('sec-rw').classList.toggle('hidden',      !onRW  || !loaded);
+  document.getElementById('sec-rw-user').classList.toggle('hidden',  !onRW  || !loaded);
+  if (onPo  && loaded) renderOverages();
+  if (onSym && loaded) renderSym();
+  if (onInf && loaded) renderInFac();
+  if (onSV  && loaded) renderSV();
+  if (onBP  && loaded) { renderBP(); renderBPDetail(); }
+  if (onNC  && loaded) { renderNC(); renderNCDetail(); }
+  if (onRW  && loaded) { renderRW(); renderRWUser(); }
+  if (onLbl)           renderLbls();
+}
+function renderOverages(){
+  let rows=OV.rows;
+  if(OV.q) rows=rows.filter(r=>r.some(c=>String(c??'').toLowerCase().includes(OV.q)));
+  rows=rows.slice().sort((a,b)=>OV.sortDir*(OV.sortCol===1?parseMDY(a[1])-parseMDY(b[1]):(a[OV.sortCol]<b[OV.sortCol]?-1:a[OV.sortCol]>b[OV.sortCol]?1:0)));
+  const total=rows.length,start=OV.page*OV.pg,pg=rows.slice(start,start+OV.pg),pages=Math.ceil(total/OV.pg)||1;
+  updatePoBadge();
+  // po-count reflects filtered result when a search is active
+  const countLabel = OV.q
+    ? `${total.toLocaleString()} of ${OV.rows.length.toLocaleString()} records`
+    : `${total.toLocaleString()} records`;
+  document.getElementById('po-count').textContent = countLabel;
+  const hd=OV_COLS.map((c,i)=>`<th style="cursor:pointer;white-space:nowrap" onclick="ovSort(${i})">${c}${OV.sortCol===i?(OV.sortDir>0?' &#9650;':' &#9660;'):''}</th>`).join('');
+  let html=`<thead><tr>${hd}</tr></thead><tbody>`;
+  pg.forEach(r=>{html+=`<tr>${r.map(c=>`<td>${c??''}</td>`).join('')}</tr>`;});
+  document.getElementById('t-po').innerHTML=html+'</tbody>';
+  const pBtn=(lbl,dis,fn)=>`<button onclick="${fn}" style="padding:4px 10px;border:1px solid var(--gray-50);border-radius:5px;cursor:pointer;font-size:12px"${dis?' disabled':''}>${lbl}</button>`;
+  document.getElementById('po-pager').innerHTML=
+    pBtn('&#9664; Prev',OV.page===0,"ovPage(-1)")+
+    `<span style="font-size:11px;padding:0 8px">Page ${OV.page+1} of ${pages}</span>`+
+    pBtn('Next &#9654;',OV.page>=pages-1,"ovPage(1)");
+}
+function ovSort(col){OV.sortDir=OV.sortCol===col?-OV.sortDir:1;OV.sortCol=col;OV.page=0;renderOverages();}
+function ovPage(d){OV.page=Math.max(0,Math.min(Math.ceil(OV.rows.length/OV.pg)-1,OV.page+d));renderOverages();}
+function exportOverages(){
+  if(!OV.rows.length){toast('No overage data to export.');return;}
+  const csv=[OV_COLS.join(','),...OV.rows.map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(','))].join('\r\n');
+  const a=document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download=`PO_Overages_${new Date().toISOString().slice(0,10)}.csv`;a.click();
+}
+// ── Boot: restore from localStorage or show upload ─────────────────────────
+(function boot() {
+  const now = new Date();
+  document.getElementById('hdr-now').textContent = 'Now: ' + fmtTs(now);
+  document.getElementById('foot-ts').textContent = fmtTs(now);
+  setInterval(()=>{
+    const n = new Date();
+    document.getElementById('hdr-now').textContent = 'Now: ' + fmtTs(n);
+    document.getElementById('foot-ts').textContent = fmtTs(n);
+  }, 60000);
+
+  if (tryLoadSaved()) {
+    toast('📦 Loaded cached data from last import', 4000);
+    showDashboard();
+  }
+})();
+</script>
+</body>
+</html>
